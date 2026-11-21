@@ -58,6 +58,7 @@ class Vision:
         self.cam_index = None
         self.running = False
         self.follow = False
+        self.last_ts = 0
         self.gestures = False
         self.jpeg = None
         self.info = {"camera": "off", "face": None, "sign": "None", "fps": 0, "last_action": ""}
@@ -146,14 +147,19 @@ class Vision:
             dt = min(now - last, 0.1)
             last = now
             frame_no += 1
-            ts = int((now - start) * 1000)
+            # MediaPipe needs timestamps that only go up, even after switching cameras
+            ts = max(int(time.monotonic() * 1000), self.last_ts + 1)
+            self.last_ts = ts
             T = self.lamp.s["tracking"]
             face = None
 
             if self.face_det is not None:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-                res = self.face_det.detect_for_video(img, ts)
+                try:
+                    res = self.face_det.detect_for_video(img, ts)
+                except ValueError:
+                    continue
                 if res.detections:
                     box = max(res.detections, key=lambda d: d.bounding_box.width * d.bounding_box.height).bounding_box
                     cx, cy = box.origin_x + box.width / 2, box.origin_y + box.height / 2
@@ -182,7 +188,12 @@ class Vision:
                     fx = fy = None
 
                 if self.gestures and self.gesture_rec is not None and frame_no % 2 == 0:
-                    g = self.gesture_rec.recognize_for_video(img, ts)
+                    try:
+                        g = self.gesture_rec.recognize_for_video(img, ts)
+                    except ValueError:
+                        g = None
+                    if g is None:
+                        continue
                     sign = get_sign(g.hand_landmarks[0]) if g.hand_landmarks else "None"
                     self.info["sign"] = sign
                     if sign != held:
