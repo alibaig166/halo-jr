@@ -118,5 +118,13 @@
       30,
       150
     ]
+  },
+  "speeds": {
+    "base": 10,
+    "upper": 10,
+    "pushrod": 10,
+    "head": 10,
+    "iris": 60,
+    "camera": 60
   }
 }

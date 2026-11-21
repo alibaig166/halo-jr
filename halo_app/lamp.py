@@ -148,7 +148,7 @@ class Lamp:
         self.target = {"yaw": 0.0, "lean": lv[0], "fore": lv[1], "trim": 0.0}
         start = self.servos_for(self.target)
         self.from_sv, self.to_sv = dict(start), dict(start)
-        self.t0, self.dur = time.time(), 0.0
+        self.t0, self.dur = time.time(), {j: 0.0 for j in JOINTS}   # each servo has its own move time
         self.light_on = False
         self.brightness = self.s["light"]["brightness"]
         self.move_thread = None
@@ -208,38 +208,60 @@ class Lamp:
     # ---------- current state (interpolated like the ESP32 does) ----------
     def current_servos(self):
         with self.lock:
-            if self.dur <= 0:
-                return dict(self.to_sv)
-            u = clamp((time.time() - self.t0) / self.dur, 0, 1)
-            k = 0.5 - 0.5 * math.cos(math.pi * u)
-            return {j: self.from_sv[j] + (self.to_sv[j] - self.from_sv[j]) * k for j in JOINTS}
+            out = {}
+            for j in JOINTS:
+                if self.dur[j] <= 0:
+                    out[j] = self.to_sv[j]
+                    continue
+                u = clamp((time.time() - self.t0) / self.dur[j], 0, 1)
+                k = 0.5 - 0.5 * math.cos(math.pi * u)
+                out[j] = self.from_sv[j] + (self.to_sv[j] - self.from_sv[j]) * k
+            return out
 
     def moving(self):
-        return self.dur > 0 and time.time() - self.t0 < self.dur
+        return time.time() - self.t0 < max(self.dur.values())
 
     # ---------- commands ----------
-    def _send_targets(self, sv, ms):
+    def speed_of(self, name):
+        """deg/s for one servo (camera = both camera servos)."""
+        return max(1, self.s.get("speeds", {}).get(name, self.s["speed"]))
+
+    def _send_targets(self, sv, ms_by_joint):
         ch = self.s["channels"]
-        vals = [-1] * 8
-        for j in JOINTS:
-            vals[ch[j]] = sv[j]
         if not self.sent_once:
             p = self.s["pulse"]
             self.link.send("C %d %d" % (p["min"], p["max"]))
-            ms = 0 if not self.link.connected else ms
+            if not self.link.connected:
+                ms_by_joint = {j: 0 for j in JOINTS}
             self.sent_once = self.link.connected
-        self.link.send("T %d %s" % (ms, " ".join("%.1f" % v if v >= 0 else "-1" for v in vals)))
+        groups = {}                                   # servos with the same move time go in one command
+        for j in JOINTS:
+            groups.setdefault(int(ms_by_joint[j]), []).append(j)
+        for ms, joints in groups.items():
+            vals = [-1] * 8
+            for j in joints:
+                vals[ch[j]] = sv[j]
+            self.link.send("T %d %s" % (ms, " ".join("%.1f" % v if v >= 0 else "-1" for v in vals)))
 
     def go_servos(self, sv, ms=None):
         now_sv = self.current_servos()
         if ms is None:
-            d = max(abs(sv[j] - now_sv[j]) for j in JOINTS)
-            ms = max(self.s["min_move_ms"], d / max(1, self.s["speed"]) * 1000)
+            # each servo uses its own speed from Settings
+            ms_j = {}
+            for j in JOINTS:
+                d = abs(sv[j] - now_sv[j])
+                ms_j[j] = 0 if d < 0.05 else max(self.s["min_move_ms"], d / self.speed_of(j) * 1000)
+            # upper arm and push rod must finish together, or the elbow can jam in the middle of a move
+            pair = max(ms_j["upper"], ms_j["pushrod"])
+            if pair:
+                ms_j["upper"] = ms_j["pushrod"] = pair
+        else:
+            ms_j = {j: ms for j in JOINTS}
         with self.lock:
             self.from_sv, self.to_sv = now_sv, dict(sv)
-            self.t0, self.dur = time.time(), ms / 1000.0
-        self._send_targets(sv, int(ms))
-        return ms
+            self.t0, self.dur = time.time(), {j: ms_j[j] / 1000.0 for j in JOINTS}
+        self._send_targets(sv, ms_j)
+        return max(ms_j.values())
 
     def go(self, pose, ms=None):
         p = self.legal({**self.target, **pose})
@@ -258,9 +280,12 @@ class Lamp:
         self.go_servos(sv)
         return None
 
-    def set_small(self, name, value, ms=600):
+    def set_small(self, name, value, ms=None):
         """Iris and camera servos: moved on their own, no arm maths."""
         v = clamp(float(value), 0, 180)
+        if ms is None:
+            d = abs(v - self.small[name])
+            ms = d / self.speed_of("iris" if name == "iris" else "camera") * 1000
         self.small[name] = v
         vals = [-1] * 8
         vals[self.s["small"]["channels"][name]] = v

@@ -203,9 +203,18 @@ table.lv input { width: 64px; }
           <label class="check"><input type="checkbox" id="gimbal"> Head gimbal (keep the beam level)</label>
         </section>
         <section style="display:grid;gap:8px">
+          <h2>Speed of each servo (degrees per second)</h2>
+          <div class="grid2">
+            <label class="field">Base turn<input type="number" id="sp-base" min="1" max="200"></label>
+            <label class="field">Upper arm<input type="number" id="sp-upper" min="1" max="200"></label>
+            <label class="field">Push rod<input type="number" id="sp-pushrod" min="1" max="200"></label>
+            <label class="field">Head<input type="number" id="sp-head" min="1" max="200"></label>
+            <label class="field">Iris<input type="number" id="sp-iris" min="1" max="300"></label>
+            <label class="field">Camera (both servos)<input type="number" id="sp-camera" min="1" max="300"></label>
+          </div>
+          <p class="note">Upper arm and push rod always finish a move together (the slower one sets the time) so the elbow can't jam halfway.</p>
           <h2>Motion</h2>
           <div class="grid2">
-            <label class="field">Speed (deg/s)<input type="number" id="speed" min="1" max="120"></label>
             <label class="field">Shortest move (ms)<input type="number" id="minms" min="0" max="5000" step="100"></label>
             <label class="field">Pulse min (µs)<input type="number" id="pmin"></label>
             <label class="field">Pulse max (µs)<input type="number" id="pmax"></label>
@@ -317,12 +326,13 @@ $('follow').onclick = () => api('/api/camera', { follow: !(ST && ST.vision.follo
 $('gestures').onclick = () => api('/api/camera', { gestures: !(ST && ST.vision.gestures) }).catch(e => $('cam-err').textContent = e.message);
 
 // ---------- settings ----------
+const SPEEDS = ['base', 'upper', 'pushrod', 'head', 'iris', 'camera'];
 function fillSettings() {
   $('set-ch').innerHTML = JOINTS.map(j => `<label class="field">${NAMES[j]} channel<input type="number" id="ch-${j}" min="0" max="7" value="${S.channels[j]}"></label>
     <label class="check" style="align-self:end"><input type="checkbox" id="inv-${j}" ${S.invert[j] ? 'checked' : ''}> Reversed</label>`).join('');
   $('off-base').value = S.offsets.base; $('off-upper').value = S.offsets.upper; $('off-pushrod').value = S.offsets.pushrod;
   $('head-center').value = S.head.center; $('gimbal').checked = S.head.gimbal;
-  $('speed').value = S.speed; $('minms').value = S.min_move_ms; $('pmin').value = S.pulse.min; $('pmax').value = S.pulse.max;
+  SPEEDS.forEach(k => $('sp-' + k).value = (S.speeds || {})[k] ?? S.speed); $('minms').value = S.min_move_ms; $('pmin').value = S.pulse.min; $('pmax').value = S.pulse.max;
   $('lv-table').innerHTML = '<tr><th>Level</th><th>Lean</th><th>Forearm</th></tr>' + S.levels.map((l, i) =>
     `<tr><td>${i + 1}</td><td><input type="number" id="lv-${i}-0" value="${l[0]}"></td><td><input type="number" id="lv-${i}-1" value="${l[1]}"></td></tr>`).join('');
   const T = S.tracking;
@@ -336,7 +346,7 @@ $('save').onclick = async () => {
   JOINTS.forEach(j => { s.channels[j] = n('ch-' + j); s.invert[j] = $('inv-' + j).checked; });
   s.offsets = { base: n('off-base'), upper: n('off-upper'), pushrod: n('off-pushrod') };
   s.head.center = n('head-center'); s.head.gimbal = $('gimbal').checked;
-  s.speed = n('speed'); s.min_move_ms = n('minms'); s.pulse = { min: n('pmin'), max: n('pmax') };
+  s.speeds = Object.fromEntries(SPEEDS.map(k => [k, Math.max(1, n('sp-' + k))])); s.min_move_ms = n('minms'); s.pulse = { min: n('pmin'), max: n('pmax') };
   s.levels = s.levels.map((_, i) => [n(`lv-${i}-0`), n(`lv-${i}-1`)]);
   Object.assign(s.tracking, { gain: n('t-gain'), deadzone: n('t-dz'), smooth: n('t-smooth'), max_speed: n('t-max'), pan_invert: $('t-pan').checked, tilt_invert: $('t-tilt').checked });
   try { await api('/api/settings', s); S = s; buildControls(); $('saved').textContent = 'Saved ' + new Date().toLocaleTimeString(); }

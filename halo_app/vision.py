@@ -167,7 +167,7 @@ class Vision:
                         dz = T["deadzone"]
                         ox = ex * T["fov_x"] if abs(ex) > dz else 0.0
                         oy = ey * T["fov_y"] if abs(ey) > dz else 0.0
-                        lim = T["max_speed"] * dt
+                        lim = min(T["max_speed"], self.lamp.speed_of("camera")) * dt
                         mx = max(-lim, min(lim, ox * T["gain"] * dt))
                         my = max(-lim, min(lim, oy * T["gain"] * dt))
                         if mx or my:
