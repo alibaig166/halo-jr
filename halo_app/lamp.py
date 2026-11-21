@@ -63,7 +63,9 @@ class SerialLink:
         out = []
         for p in serial.tools.list_ports.comports():
             name = p.device
-            if "Bluetooth" in name or "debug-console" in name:
+            if "Bluetooth" in name or "debug-console" in name or "wlan-debug" in name:
+                continue
+            if name.startswith("/dev/tty."):      # Mac lists every port twice; /dev/cu.* is the one to use
                 continue
             out.append({"device": name, "desc": p.description or ""})
         return out
@@ -72,6 +74,8 @@ class SerialLink:
         self.disconnect()
         if serial is None:
             raise RuntimeError("pyserial is not installed (pip install pyserial)")
+        if not port:
+            raise RuntimeError("no port picked. Plug in the ESP32 and press the refresh button")
         s = serial.Serial(port, 115200, timeout=0.05)
         time.sleep(1.8)               # the ESP32 resets when the port opens
         with self.lock:

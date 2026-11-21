@@ -259,7 +259,7 @@ $('connect').onclick = async () => {
   try {
     if (ST && ST.connected) await api('/api/disconnect', {});
     else { $('connect').textContent = 'Connecting…'; await api('/api/connect', { port: $('port').value }); }
-  } catch (e) { alert(e.message); }
+  } catch (e) { alert(e.message); console.error(e); }
   $('connect').textContent = 'Connect';
 };
 
