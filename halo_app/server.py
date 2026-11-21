@@ -1,4 +1,5 @@
 """Halo Jr. control app. Run:  python3 server.py   then open  http://localhost:5050"""
+import logging
 import os
 import time
 
@@ -10,6 +11,8 @@ from vision import Vision
 HERE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(HERE, "static"), static_url_path="/static")
 
+logging.getLogger("werkzeug").setLevel(logging.ERROR)   # stop printing every page refresh
+
 link = SerialLink()
 lamp = Lamp(link)
 vision = Vision(lamp)
@@ -20,6 +23,7 @@ def ok(**extra):
 
 
 def bad(msg):
+    print("  !", msg)
     return jsonify({"ok": False, "error": msg}), 400
 
 
