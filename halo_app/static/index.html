@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Halo Jr. Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: live 3D lamp on the left, tabbed control rail on the right, serial log under the 3D view */
+:root {
+  --bg: #0f1216; --panel: #171b21; --panel2: #1e232b; --line: #2a303a; --ink: #e9ecf1; --muted: #8e97a6;
+  --pla: #f28a2e; --pla-ink: #1b0f04; --ok: #55c487; --warn: #e8b04b; --bad: #ef6b5b;
+  --f-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--f-body); padding: 14px 16px; }
+.app { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; height: 100%; max-width: 1600px; margin: 0 auto; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+h1 { font: 800 26px var(--f-display); margin: 0 auto 0 0; letter-spacing: -.01em; }
+h1 span { color: var(--pla); }
+h2 { font: 600 12px var(--f-display); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 0 0 8px; }
+.pill { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; padding: 5px 11px; border-radius: 99px; border: 1px solid var(--line); background: var(--panel); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); }
+.pill.on .dot { background: var(--ok); }
+select, input[type=number], input[type=text] { background: var(--panel2); color: var(--ink); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; font: 13px var(--f-mono); }
+input[type=number] { width: 74px; }
+button { cursor: pointer; font: 500 13px var(--f-body); color: var(--ink); background: var(--panel2); border: 1px solid var(--line); border-radius: 7px; padding: 7px 12px; }
+button:hover { border-color: var(--pla); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--pla); outline-offset: 1px; }
+button.primary { background: var(--pla); color: var(--pla-ink); border-color: var(--pla); font-weight: 600; }
+button.danger { color: var(--bad); }
+button.on { border-color: var(--pla); color: var(--pla); }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 12px; min-height: 0; }
+.left { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 12px; min-height: 0; }
+.viewer { position: relative; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: radial-gradient(120% 90% at 50% 20%, #1b2029 0%, #0c0e12 70%); min-height: 360px; }
+.viewer iframe { width: 100%; height: 100%; border: 0; display: block; }
+.readout { position: absolute; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
+.readout span { font: 12px var(--f-mono); background: rgba(23,27,33,.9); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+.readout b { color: var(--pla); font-weight: 500; }
+.status { position: absolute; right: 12px; top: 12px; font-size: 12px; background: rgba(23,27,33,.9); border: 1px solid var(--line); border-radius: 99px; padding: 4px 10px; }
+.log { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: 12px/1.5 var(--f-mono); color: var(--muted); height: 130px; overflow: auto; white-space: pre-wrap; }
+.rail { display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; min-height: 0; overflow: hidden; }
+.tabs { display: flex; gap: 4px; padding: 6px; border-bottom: 1px solid var(--line); }
+.tabs button { flex: 1; border: 0; background: none; padding: 8px 6px; }
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); }
+.pane { overflow: auto; padding: 14px; display: grid; gap: 18px; align-content: start; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; }
+.levels button { min-width: 42px; font-family: var(--f-mono); }
+.slider { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; font-size: 13px; color: var(--muted); }
+.slider output { font: 13px var(--f-mono); color: var(--ink); }
+.slider input { grid-column: 1 / -1; width: 100%; accent-color: var(--pla); margin: 2px 0 0; }
+.note { font-size: 12.5px; color: var(--muted); margin: 0; }
+.err { color: var(--bad); font-size: 13px; min-height: 1.2em; margin: 0; }
+.video { width: 100%; aspect-ratio: 4 / 3; background: #000; border-radius: 8px; border: 1px solid var(--line); object-fit: cover; display: block; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.field { display: grid; gap: 3px; font-size: 12.5px; color: var(--muted); }
+.check { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.check input { accent-color: var(--pla); width: 16px; height: 16px; }
+table.lv { border-collapse: collapse; font-size: 13px; }
+table.lv td, table.lv th { padding: 3px 6px 3px 0; text-align: left; color: var(--muted); font-weight: 500; }
+table.lv input { width: 64px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+.kv b { font: 500 13px var(--f-mono); }
+@media (max-width: 980px) {
+  html, body { height: auto; }
+  .main { grid-template-columns: minmax(0, 1fr); }
+  .viewer { height: 60vh; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Halo Jr. <span>Control</span></h1>
+    <span class="pill" id="conn"><span class="dot"></span><span id="conn-text">Not connected (simulator)</span></span>
+    <select id="port" aria-label="ESP32 port"></select>
+    <button id="refresh" title="Look for ports again">↻</button>
+    <button class="primary" id="connect">Connect</button>
+  </header>
+
+  <div class="main">
+    <div class="left">
+      <div class="viewer">
+        <iframe id="bench" src="/static/bench.html?embed" title="3D lamp"></iframe>
+        <div class="status" id="status">ready</div>
+        <div class="readout" id="readout"></div>
+      </div>
+      <div class="log" id="log" aria-label="ESP32 log"></div>
+    </div>
+
+    <div class="rail">
+      <div class="tabs" role="tablist">
+        <button role="tab" data-tab="control" aria-selected="true">Control</button>
+        <button role="tab" data-tab="servos" aria-selected="false">Servo test</button>
+        <button role="tab" data-tab="camera" aria-selected="false">Camera</button>
+        <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+      </div>
+
+      <!-- CONTROL -->
+      <div class="pane" id="tab-control">
+        <section>
+          <h2>Levels</h2>
+          <div class="row levels" id="levels"></div>
+        </section>
+        <section>
+          <h2>Moves</h2>
+          <div class="row" id="moves"></div>
+        </section>
+        <section>
+          <h2>Lamp angles</h2>
+          <div style="display:grid;gap:10px">
+            <label class="slider">Base turn <output id="o-yaw"></output><input type="range" id="p-yaw" min="-90" max="90" step="1"></label>
+            <label class="slider">Upper arm lean <output id="o-lean"></output><input type="range" id="p-lean" min="-50" max="100" step="1"></label>
+            <label class="slider">Forearm angle <output id="o-fore"></output><input type="range" id="p-fore" min="-10" max="170" step="1"></label>
+            <label class="slider">Beam up / down <output id="o-trim"></output><input type="range" id="p-trim" min="-60" max="60" step="1"></label>
+          </div>
+          <p class="err" id="pose-err"></p>
+          <p class="note">The page refuses any combination that would jam the elbow. With the gimbal on, the head keeps the beam level when the forearm moves.</p>
+        </section>
+        <section>
+          <h2>Light</h2>
+          <div class="row" style="align-items:center">
+            <button id="light">Light off</button>
+            <label class="slider" style="flex:1">Brightness <output id="o-bri"></output><input type="range" id="bri" min="0" max="255" step="1"></label>
+          </div>
+        </section>
+        <section class="row">
+          <button class="danger" id="release">Release all servos (go limp)</button>
+        </section>
+      </div>
+
+      <!-- SERVO TEST -->
+      <div class="pane" id="tab-servos" hidden>
+        <section style="display:grid;gap:12px">
+          <h2>One servo at a time (real values sent to each channel)</h2>
+          <label class="slider" id="s-base-l">Base turn <output id="o-s-base"></output><input type="range" id="s-base" min="0" max="180" step="1"></label>
+          <label class="slider" id="s-upper-l">Upper arm <output id="o-s-upper"></output><input type="range" id="s-upper" min="0" max="180" step="1"></label>
+          <label class="slider" id="s-pushrod-l">Push rod <output id="o-s-pushrod"></output><input type="range" id="s-pushrod" min="0" max="180" step="1"></label>
+          <label class="slider" id="s-head-l">Head <output id="o-s-head"></output><input type="range" id="s-head" min="0" max="180" step="1"></label>
+          <h2 style="margin-top:8px">Head small servos (ch4 iris, ch5 camera left/right, ch6 camera up/down)</h2>
+          <label class="slider">Iris <output id="o-s-iris"></output><input type="range" id="s-iris" min="0" max="180" step="1"></label>
+          <div class="row">
+            <button id="iris-open">Iris open</button><button id="iris-close">Iris close</button>
+            <button id="iris-save-open">Save as open</button><button id="iris-save-close">Save as closed</button>
+          </div>
+          <label class="slider">Camera left / right <output id="o-s-cam_pan"></output><input type="range" id="s-cam_pan" min="0" max="180" step="1"></label>
+          <label class="slider">Camera up / down <output id="o-s-cam_tilt"></output><input type="range" id="s-cam_tilt" min="0" max="180" step="1"></label>
+          <p class="err" id="servo-err"></p>
+          <p class="note">Upper arm and push rod are checked: if a value would bend the elbow outside its range, the page refuses and says why. Moving the head here turns the gimbal off until the next level or move.</p>
+        </section>
+      </div>
+
+      <!-- CAMERA -->
+      <div class="pane" id="tab-camera" hidden>
+        <section style="display:grid;gap:8px">
+          <h2>Camera</h2>
+          <div class="row" style="align-items:center">
+            <label class="field" style="grid-auto-flow:column;align-items:center;gap:6px">Camera
+              <select id="cam-index"><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
+            <button class="primary" id="cam-start">Start camera</button>
+            <button id="cam-stop">Stop</button>
+          </div>
+          <img class="video" id="video" alt="Camera view" hidden>
+          <p class="err" id="cam-err"></p>
+          <p class="note" id="cam-note">On a Mac, 0 is usually the built-in camera and 1 the USB webcam.</p>
+        </section>
+        <section style="display:grid;gap:8px">
+          <h2>Tracking</h2>
+          <div class="row">
+            <button id="follow">Follow my face: off</button>
+            <button id="gestures">Hand gestures: off</button>
+          </div>
+          <div class="kv">
+            <span>Face offset</span><b id="v-face">—</b>
+            <span>Hand sign</span><b id="v-sign">—</b>
+            <span>Last gesture action</span><b id="v-act">—</b>
+            <span>Camera</span><b id="v-fps">off</b>
+          </div>
+          <p class="note">Follow moves the two camera servos (ch5 left/right, ch6 up/down) to keep your face in the middle, same as face_follow_test.py. Hold a hand sign still for about half a second: open palm = light on/off, thumbs up = nod, thumbs down = shake, fist = sleep / wake.</p>
+        </section>
+      </div>
+
+      <!-- SETTINGS -->
+      <div class="pane" id="tab-settings" hidden>
+        <section style="display:grid;gap:8px">
+          <h2>Channels and directions</h2>
+          <div class="grid2" id="set-ch"></div>
+        </section>
+        <section style="display:grid;gap:8px">
+          <h2>Zero offsets</h2>
+          <div class="grid2">
+            <label class="field">Base: servo at turn 0<input type="number" id="off-base"></label>
+            <label class="field">Upper: servo = lean + <input type="number" id="off-upper"></label>
+            <label class="field">Push rod: servo = forearm + <input type="number" id="off-pushrod"></label>
+            <label class="field">Head centre (level 1)<input type="number" id="head-center"></label>
+          </div>
+          <label class="check"><input type="checkbox" id="gimbal"> Head gimbal (keep the beam level)</label>
+        </section>
+        <section style="display:grid;gap:8px">
+          <h2>Motion</h2>
+          <div class="grid2">
+            <label class="field">Speed (deg/s)<input type="number" id="speed" min="1" max="120"></label>
+            <label class="field">Shortest move (ms)<input type="number" id="minms" min="0" max="5000" step="100"></label>
+            <label class="field">Pulse min (µs)<input type="number" id="pmin"></label>
+            <label class="field">Pulse max (µs)<input type="number" id="pmax"></label>
+          </div>
+        </section>
+        <section style="display:grid;gap:8px">
+          <h2>Levels (upper arm lean, forearm angle)</h2>
+          <table class="lv" id="lv-table"></table>
+        </section>
+        <section style="display:grid;gap:8px">
+          <h2>Face tracking</h2>
+          <div class="grid2">
+            <label class="field">Speed (gain)<input type="number" id="t-gain" step="0.5"></label>
+            <label class="field">Dead zone<input type="number" id="t-dz" step="0.01"></label>
+            <label class="field">Smoothing 0–0.9<input type="number" id="t-smooth" step="0.1"></label>
+            <label class="field">Max deg/s<input type="number" id="t-max"></label>
+          </div>
+          <label class="check"><input type="checkbox" id="t-pan"> Flip left/right</label>
+          <label class="check"><input type="checkbox" id="t-tilt"> Flip up/down</label>
+        </section>
+        <div class="row"><button class="primary" id="save">Save settings</button><span class="note" id="saved"></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const api = (path, body) => fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j; });
+let S = null, ST = null, dragging = null;
+const JOINTS = ['base', 'upper', 'pushrod', 'head'];
+const NAMES = { base: 'Base turn', upper: 'Upper arm', pushrod: 'Push rod', head: 'Head' };
+
+// ---------- tabs ----------
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-selected', x === b));
+  document.querySelectorAll('.pane').forEach(p => p.hidden = p.id !== 'tab-' + b.dataset.tab);
+});
+
+// ---------- connection ----------
+async function loadPorts() {
+  const ports = await api('/api/ports');
+  const sel = $('port'), keep = sel.value || (S && S.serial_port);
+  sel.innerHTML = ports.length ? ports.map(p => `<option value="${p.device}">${p.device}</option>`).join('') : '<option value="">No ESP32 found</option>';
+  if (keep && ports.some(p => p.device === keep)) sel.value = keep;
+  else { const usb = ports.find(p => /usbserial|wchusb|SLAB|COM/i.test(p.device)); if (usb) sel.value = usb.device; }
+}
+$('refresh').onclick = loadPorts;
+$('connect').onclick = async () => {
+  try {
+    if (ST && ST.connected) await api('/api/disconnect', {});
+    else { $('connect').textContent = 'Connecting…'; await api('/api/connect', { port: $('port').value }); }
+  } catch (e) { alert(e.message); }
+  $('connect').textContent = 'Connect';
+};
+
+// ---------- control ----------
+function buildControls() {
+  $('levels').innerHTML = S.levels.map((_, i) => `<button data-lv="${i + 1}">${i + 1}</button>`).join('');
+  $('levels').querySelectorAll('button').forEach(b => b.onclick = () => api('/api/level', { n: +b.dataset.lv }).catch(e => $('pose-err').textContent = e.message));
+  const moves = [['wake', 'Wake'], ['sleep', 'Sleep'], ['nod', 'Nod'], ['shake', 'Shake'], ['look', 'Look around'], ['stretch', 'Stretch'], ['stop', 'Stop']];
+  $('moves').innerHTML = moves.map(([k, n]) => `<button data-mv="${k}">${n}</button>`).join('');
+  $('moves').querySelectorAll('button').forEach(b => b.onclick = () => api('/api/move', { name: b.dataset.mv }));
+  const L = S.limits;
+  [['yaw', L.yaw], ['lean', L.lean], ['fore', L.fore], ['trim', L.trim]].forEach(([k, r]) => { $('p-' + k).min = r[0]; $('p-' + k).max = r[1]; });
+}
+['yaw', 'lean', 'fore', 'trim'].forEach(k => {
+  const el = $('p-' + k);
+  el.addEventListener('input', () => { dragging = el; $('o-' + k).textContent = el.value + '°'; });
+  el.addEventListener('change', async () => {
+    try { await api('/api/pose', { [k]: +el.value }); $('pose-err').textContent = ''; }
+    catch (e) { $('pose-err').textContent = e.message; }
+    dragging = null;
+  });
+});
+$('light').onclick = () => api('/api/light', { on: !(ST && ST.lamp.light.on) });
+$('bri').addEventListener('input', () => { dragging = $('bri'); $('o-bri').textContent = $('bri').value; });
+$('bri').addEventListener('change', () => { api('/api/light', { brightness: +$('bri').value }); dragging = null; });
+$('release').onclick = () => api('/api/release', {});
+
+// ---------- servo test ----------
+const SMALL = ['iris', 'cam_pan', 'cam_tilt'];
+[...JOINTS, ...SMALL].forEach(j => {
+  const el = $('s-' + j);
+  el.addEventListener('input', () => { dragging = el; $('o-s-' + j).textContent = el.value; });
+  el.addEventListener('change', async () => {
+    try { await api('/api/servo', { joint: j, value: +el.value }); $('servo-err').textContent = ''; }
+    catch (e) { $('servo-err').textContent = e.message; }
+    dragging = null;
+  });
+});
+
+const irisMsg = m => { $('servo-err').textContent = m; setTimeout(() => $('servo-err').textContent = '', 2500); };
+$('iris-open').onclick = () => api('/api/iris', { open: true });
+$('iris-close').onclick = () => api('/api/iris', { open: false });
+$('iris-save-open').onclick = () => api('/api/iris', { save: 'open' }).then(() => irisMsg('Saved: iris open = ' + $('s-iris').value));
+$('iris-save-close').onclick = () => api('/api/iris', { save: 'closed' }).then(() => irisMsg('Saved: iris closed = ' + $('s-iris').value));
+
+// ---------- camera ----------
+$('cam-start').onclick = async () => {
+  $('cam-err').textContent = ''; $('cam-start').textContent = 'Starting…';
+  try { await api('/api/camera', { on: true, index: +$('cam-index').value }); $('video').src = '/video?' + Date.now(); $('video').hidden = false; }
+  catch (e) { $('cam-err').textContent = e.message; }
+  $('cam-start').textContent = 'Start camera';
+};
+$('cam-stop').onclick = () => { api('/api/camera', { on: false }); $('video').hidden = true; $('video').removeAttribute('src'); };
+$('follow').onclick = () => api('/api/camera', { follow: !(ST && ST.vision.follow) }).catch(e => $('cam-err').textContent = e.message);
+$('gestures').onclick = () => api('/api/camera', { gestures: !(ST && ST.vision.gestures) }).catch(e => $('cam-err').textContent = e.message);
+
+// ---------- settings ----------
+function fillSettings() {
+  $('set-ch').innerHTML = JOINTS.map(j => `<label class="field">${NAMES[j]} channel<input type="number" id="ch-${j}" min="0" max="7" value="${S.channels[j]}"></label>
+    <label class="check" style="align-self:end"><input type="checkbox" id="inv-${j}" ${S.invert[j] ? 'checked' : ''}> Reversed</label>`).join('');
+  $('off-base').value = S.offsets.base; $('off-upper').value = S.offsets.upper; $('off-pushrod').value = S.offsets.pushrod;
+  $('head-center').value = S.head.center; $('gimbal').checked = S.head.gimbal;
+  $('speed').value = S.speed; $('minms').value = S.min_move_ms; $('pmin').value = S.pulse.min; $('pmax').value = S.pulse.max;
+  $('lv-table').innerHTML = '<tr><th>Level</th><th>Lean</th><th>Forearm</th></tr>' + S.levels.map((l, i) =>
+    `<tr><td>${i + 1}</td><td><input type="number" id="lv-${i}-0" value="${l[0]}"></td><td><input type="number" id="lv-${i}-1" value="${l[1]}"></td></tr>`).join('');
+  const T = S.tracking;
+  $('t-gain').value = T.gain; $('t-dz').value = T.deadzone; $('t-smooth').value = T.smooth; $('t-max').value = T.max_speed;
+  $('t-pan').checked = T.pan_invert; $('t-tilt').checked = T.tilt_invert;
+  $('cam-index').value = T.camera_index;
+}
+$('save').onclick = async () => {
+  const n = id => +$(id).value;
+  const s = JSON.parse(JSON.stringify(S));
+  JOINTS.forEach(j => { s.channels[j] = n('ch-' + j); s.invert[j] = $('inv-' + j).checked; });
+  s.offsets = { base: n('off-base'), upper: n('off-upper'), pushrod: n('off-pushrod') };
+  s.head.center = n('head-center'); s.head.gimbal = $('gimbal').checked;
+  s.speed = n('speed'); s.min_move_ms = n('minms'); s.pulse = { min: n('pmin'), max: n('pmax') };
+  s.levels = s.levels.map((_, i) => [n(`lv-${i}-0`), n(`lv-${i}-1`)]);
+  Object.assign(s.tracking, { gain: n('t-gain'), deadzone: n('t-dz'), smooth: n('t-smooth'), max_speed: n('t-max'), pan_invert: $('t-pan').checked, tilt_invert: $('t-tilt').checked });
+  try { await api('/api/settings', s); S = s; buildControls(); $('saved').textContent = 'Saved ' + new Date().toLocaleTimeString(); }
+  catch (e) { $('saved').textContent = e.message; }
+};
+
+// ---------- live state ----------
+const bench = $('bench');
+async function poll() {
+  try {
+    ST = await api('/api/state');
+    const L = ST.lamp, P = L.pose, V = ST.vision;
+    $('conn').classList.toggle('on', ST.connected);
+    $('conn-text').textContent = ST.connected ? 'ESP32 on ' + ST.port : 'Not connected (simulator)';
+    $('connect').textContent = ST.connected ? 'Disconnect' : 'Connect';
+    $('status').textContent = L.moving ? 'moving · ' + L.status : L.status;
+    $('readout').innerHTML = JOINTS.map(j => `<span>${NAMES[j]} <b>${Math.round(L.servos[j])}</b></span>`).join('') + `<span>elbow <b>${Math.round(P.fore - P.lean)}°</b></span>`;
+    ['yaw', 'lean', 'fore', 'trim'].forEach(k => { if (dragging !== $('p-' + k)) { $('p-' + k).value = L.target[k]; $('o-' + k).textContent = Math.round(L.target[k]) + '°'; } });
+    JOINTS.forEach(j => { if (dragging !== $('s-' + j)) { $('s-' + j).value = L.target_servos[j]; $('o-s-' + j).textContent = Math.round(L.target_servos[j]); } });
+    SMALL.forEach(j => { if (dragging !== $('s-' + j)) { $('s-' + j).value = L.small[j]; $('o-s-' + j).textContent = Math.round(L.small[j]); } });
+    $('light').textContent = L.light.on ? 'Light on' : 'Light off'; $('light').classList.toggle('on', L.light.on);
+    if (dragging !== $('bri')) { $('bri').value = L.light.brightness; $('o-bri').textContent = L.light.brightness; }
+    $('log').textContent = ST.log.join('\n'); $('log').scrollTop = 1e9;
+    $('follow').textContent = 'Follow my face: ' + (V.follow ? 'on' : 'off'); $('follow').classList.toggle('on', V.follow);
+    $('gestures').textContent = 'Hand gestures: ' + (V.gestures ? 'on' : 'off'); $('gestures').classList.toggle('on', V.gestures);
+    $('v-face').textContent = V.face ? `x ${V.face.x > 0 ? '+' : ''}${V.face.x}  y ${V.face.y > 0 ? '+' : ''}${V.face.y}` : '—';
+    $('v-sign').textContent = V.sign || '—'; $('v-act').textContent = V.last_action || '—';
+    $('v-fps').textContent = V.camera === 'on' ? `on · ${V.fps} fps` : 'off';
+    if (V.error && !$('cam-err').textContent) $('cam-err').textContent = V.error;
+    if (!V.opencv) $('cam-note').textContent = 'OpenCV is not installed: pip3 install opencv-python mediapipe';
+    else if (!V.ai) $('cam-note').textContent = 'MediaPipe or the model files are missing: pip3 install mediapipe (face and gestures need it).';
+    if (V.camera === 'on' && $('video').hidden) { $('video').src = '/video?' + Date.now(); $('video').hidden = false; }
+    // 3D view follows the real lamp
+    bench.contentWindow && bench.contentWindow.postMessage({ type: 'halo-pose', pose: { yaw: P.yaw, t1: P.lean, t2: P.fore, aim: P.aim } }, '*');
+  } catch (e) {
+    $('conn-text').textContent = 'App server stopped: run python3 server.py again';
+    $('conn').classList.remove('on');
+  }
+  setTimeout(poll, 120);
+}
+
+(async () => {
+  S = await api('/api/settings');
+  buildControls(); fillSettings(); await loadPorts(); poll();
+})();
+</script>
+</body>
+</html>
