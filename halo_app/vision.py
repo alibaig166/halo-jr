@@ -81,7 +81,10 @@ class Vision:
         if cv2 is None:
             self.error = "OpenCV not installed (pip install opencv-python)"
             return False
-        cap = cv2.VideoCapture(int(index))
+        if os.name == "nt":                       # Windows: DirectShow opens webcams much faster
+            cap = cv2.VideoCapture(int(index), cv2.CAP_DSHOW)
+        else:
+            cap = cv2.VideoCapture(int(index))
         ok = cap.isOpened()
         if ok:
             for _ in range(30):
