@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Halo Jr. USB</title>
+<style>
+:root{--bg:#101214;--panel:#181b1f;--line:#2a2f35;--text:#e8eaed;--dim:#9aa1a9;--acc:#f0a030;--ok:#3ccf7a;--bad:#ff6b5b}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f4f5f7;--panel:#fff;--line:#d9dde2;--text:#16191c;--dim:#5b636b;--acc:#c77a00;--ok:#17924f;--bad:#c9372c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
+header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0 8px 0 0}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--bad)}
+.dot.on{background:var(--ok)}
+button{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.pri{background:var(--acc);color:#111;border-color:var(--acc);font-weight:600}
+main{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:12px;padding:12px 16px}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+iframe{width:100%;height:420px;border:0;border-radius:8px;background:#0b0c0e}
+h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:14px 0 8px}
+h2:first-child{margin-top:0}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.lv button{min-width:44px;font-weight:600}
+label.sl{display:grid;grid-template-columns:150px 1fr 44px;gap:8px;align-items:center;margin:6px 0}
+label.sl output{text-align:right;color:var(--acc);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--acc)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.f{display:grid;gap:4px;color:var(--dim);font-size:12px}
+.f span{color:var(--text);font-size:13px}
+.f input[type=checkbox]{width:auto;margin-right:6px;accent-color:var(--acc)}
+.f input:not([type=checkbox]){background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit;width:100%}
+#log{font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;height:150px;overflow:auto;background:var(--bg);border-radius:8px;padding:8px;color:var(--dim);white-space:pre-wrap}
+.err{color:var(--bad);min-height:1.2em;margin:6px 0 0}
+.note{color:var(--dim);font-size:12px;margin:6px 0}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chips span{border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-size:12px}
+.chips b{color:var(--acc)}
+#nosupport{display:none;background:var(--bad);color:#fff;padding:10px 16px}
+</style>
+</head>
+<body>
+<div id="nosupport">This browser can't use USB. Open this page in <b>Google Chrome</b> or <b>Microsoft Edge</b> on a laptop or PC.</div>
+<header>
+  <h1>Halo Jr. · USB control</h1>
+  <span class="dot" id="dot"></span><span id="status">Not connected</span>
+  <button class="pri" id="connect">Connect USB</button>
+  <button id="release">Release (limp)</button>
+</header>
+<main>
+  <section class="card">
+    <iframe id="bench" src="bench.html?embed=1" title="3D lamp"></iframe>
+    <div class="chips" id="chips"></div>
+    <h2>Log</h2>
+    <div id="log"></div>
+  </section>
+  <section class="card">
+    <h2>Levels</h2>
+    <div class="row lv" id="levels"></div>
+    <h2>Moves</h2>
+    <div class="row" id="moves"></div>
+    <p class="err" id="err"></p>
+
+    <h2>Servo test</h2>
+    <div id="sliders"></div>
+    <div class="row">
+      <button id="iris-open">Iris open</button><button id="iris-close">Iris close</button>
+      <button id="iris-save-open">Save as open</button><button id="iris-save-close">Save as closed</button>
+    </div>
+
+    <h2>Speed of each servo (deg/s)</h2>
+    <div class="grid2" id="speeds"></div>
+    <p class="note">Upper arm and push rod always finish together so the elbow can't jam.</p>
+
+    <h2>Directions</h2>
+    <div class="grid2" id="dirs"></div>
+    <div class="row" style="margin-top:10px"><button class="pri" id="save">Save settings</button><span class="note" id="saved"></span></div>
+    <p class="note">Settings are saved in this browser. Face tracking and gestures need the full app (python server.py).</p>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const JOINTS = ['base', 'upper', 'pushrod', 'head'];
+const SMALL = ['iris', 'cam_pan', 'cam_tilt'];
+const NAMES = { base: 'Base turn', upper: 'Upper arm', pushrod: 'Push rod', head: 'Head', iris: 'Iris', cam_pan: 'Camera left/right', cam_tilt: 'Camera up/down' };
+const DEFAULTS = {
+  channels: { base: 0, upper: 1, pushrod: 2, head: 3 },
+  invert: { base: false, upper: true, pushrod: false, head: false },
+  offsets: { base: 90, upper: 50, pushrod: 10 },
+  head: { center: 90, fore_at_level1: -10, gimbal: true },
+  limits: { yaw: [-90, 90], lean: [-50, 100], fore: [-10, 170], elbow: [15, 135], trim: [-60, 60] },
+  pulse: { min: 500, max: 2400 }, min_move_ms: 1500,
+  levels: [[-50, -10], [-35, 5], [-20, 20], [-5, 35], [10, 50], [25, 65], [40, 80]],
+  small: { channels: { iris: 4, cam_pan: 5, cam_tilt: 6 }, iris_open: 60, iris_closed: 120 },
+  speeds: { base: 10, upper: 10, pushrod: 10, head: 10, iris: 60, camera: 60 }
+};
+let S = JSON.parse(JSON.stringify(DEFAULTS));
+try { const m = JSON.parse(localStorage.getItem('halo-settings') || 'null'); if (m) for (const k in m) S[k] = (typeof m[k] === 'object' && !Array.isArray(m[k])) ? { ...S[k], ...m[k] } : m[k]; } catch (e) {}
+
+// ---------- maths (same as lamp.py) ----------
+const inv = (j, a) => S.invert[j] ? 180 - a : a;
+function servosFor(p) {
+  let head = S.head.center + p.trim;
+  if (S.head.gimbal) head -= p.fore - S.head.fore_at_level1;
+  const raw = { base: S.offsets.base + p.yaw, upper: p.lean + S.offsets.upper, pushrod: p.fore + S.offsets.pushrod, head };
+  const o = {}; JOINTS.forEach(j => o[j] = Math.round(inv(j, clamp(raw[j], 0, 180)) * 10) / 10); return o;
+}
+function poseFor(sv) {
+  const [base, upper, push, head] = JOINTS.map(j => inv(j, sv[j]));
+  const fore = push - S.offsets.pushrod;
+  let trim = head - S.head.center;
+  if (S.head.gimbal) trim += fore - S.head.fore_at_level1;
+  return { yaw: base - S.offsets.base, lean: upper - S.offsets.upper, fore, trim,
+           aim: 90 + (head - S.head.center) + (fore - S.head.fore_at_level1) };
+}
+function check(p) {
+  const L = S.limits, e = p.fore - p.lean;
+  if (p.lean < L.lean[0] || p.lean > L.lean[1]) return 'upper arm out of range';
+  if (p.fore < L.fore[0] || p.fore > L.fore[1]) return 'forearm out of range';
+  if (e < L.elbow[0] || e > L.elbow[1]) return `elbow would be ${Math.round(e)}° (must be ${L.elbow[0]}..${L.elbow[1]}, the arm would jam)`;
+  return null;
+}
+function legal(p) {
+  const L = S.limits; p = { ...p };
+  p.yaw = clamp(p.yaw, ...L.yaw); p.lean = clamp(p.lean, ...L.lean);
+  p.fore = clamp(p.fore, Math.max(L.fore[0], p.lean + L.elbow[0]), Math.min(L.fore[1], p.lean + L.elbow[1]));
+  p.trim = clamp(p.trim, ...L.trim); return p;
+}
+
+// ---------- state ----------
+let target = { yaw: 0, lean: S.levels[0][0], fore: S.levels[0][1], trim: 0 };
+let fromSv = servosFor(target), toSv = { ...fromSv }, t0 = 0, dur = { base: 0, upper: 0, pushrod: 0, head: 0 };
+const small = { iris: 90, cam_pan: 90, cam_tilt: 90 };
+let firstSend = true;
+function currentServos() {
+  const now = performance.now(), o = {};
+  JOINTS.forEach(j => {
+    if (dur[j] <= 0) { o[j] = toSv[j]; return; }
+    const u = clamp((now - t0) / dur[j], 0, 1), k = 0.5 - 0.5 * Math.cos(Math.PI * u);
+    o[j] = fromSv[j] + (toSv[j] - fromSv[j]) * k;
+  });
+  return o;
+}
+
+// ---------- USB (Web Serial) ----------
+let port = null, writer = null, reading = false;
+const enc = new TextEncoder();
+function log(t) { const el = $('log'); el.textContent += new Date().toLocaleTimeString() + ' ' + t + '\n'; el.scrollTop = el.scrollHeight; if (el.textContent.length > 20000) el.textContent = el.textContent.slice(-12000); }
+async function send(line) {
+  log('> ' + line);
+  if (!writer) return;
+  try { await writer.write(enc.encode(line + '\n')); } catch (e) { log('! ' + e.message); }
+}
+async function readLoop() {
+  const dec = new TextDecoderStream(); port.readable.pipeTo(dec.writable).catch(() => {});
+  const r = dec.readable.getReader(); let buf = ''; reading = true;
+  try {
+    while (reading) {
+      const { value, done } = await r.read(); if (done) break;
+      buf += value; let i;
+      while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (l && l !== 'OK') log('< ' + l); }
+    }
+  } catch (e) {}
+}
+function setConn(on, text) { $('dot').classList.toggle('on', on); $('status').textContent = text; $('connect').textContent = on ? 'Disconnect' : 'Connect USB'; }
+$('connect').onclick = async () => {
+  if (port) { reading = false; try { writer.releaseLock(); } catch (e) {} try { await port.close(); } catch (e) {} port = writer = null; setConn(false, 'Not connected'); return; }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    writer = port.writable.getWriter(); readLoop();
+    setConn(true, 'Connecting…');
+    await new Promise(r => setTimeout(r, 1800));      // ESP32 restarts when the port opens
+    setConn(true, 'Connected');
+    firstSend = true;
+    await send(`C ${S.pulse.min} ${S.pulse.max}`);
+    goServos(servosFor(target), 0);
+    SMALL.forEach(n => setSmall(n, small[n], 0));
+  } catch (e) {
+    port = writer = null; setConn(false, 'Not connected');
+    if (e.name !== 'NotFoundError') showErr(/open/i.test(e.message) ? 'Port is busy: close the Arduino IDE / Serial Monitor (or the Python app) and try again.' : e.message);
+  }
+};
+if (!('serial' in navigator)) { $('nosupport').style.display = 'block'; $('connect').disabled = true; }
+
+// ---------- moving ----------
+const speedOf = k => Math.max(1, S.speeds[k] || 10);
+function goServos(sv, ms) {
+  const now = currentServos(), msj = {};
+  JOINTS.forEach(j => {
+    if (ms != null) { msj[j] = ms; return; }
+    const d = Math.abs(sv[j] - now[j]);
+    msj[j] = d < 0.05 ? 0 : Math.max(S.min_move_ms, d / speedOf(j) * 1000);
+  });
+  if (ms == null) { const pair = Math.max(msj.upper, msj.pushrod); msj.upper = msj.pushrod = pair; }
+  fromSv = now; toSv = { ...sv }; t0 = performance.now(); dur = { ...msj };
+  const groups = {};
+  JOINTS.forEach(j => (groups[Math.round(msj[j])] ||= []).push(j));
+  for (const ms2 in groups) {
+    const vals = Array(8).fill(-1);
+    groups[ms2].forEach(j => vals[S.channels[j]] = sv[j]);
+    send(`T ${ms2} ` + vals.map(v => v >= 0 ? v.toFixed(1) : '-1').join(' '));
+  }
+  return Math.max(...Object.values(msj));
+}
+function go(pose, ms) { target = legal({ ...target, ...pose }); return goServos(servosFor(target), ms); }
+function setSmall(name, v, ms) {
+  v = clamp(+v, 0, 180);
+  if (ms == null) ms = Math.abs(v - small[name]) / speedOf(name === 'iris' ? 'iris' : 'camera') * 1000;
+  small[name] = v;
+  const vals = Array(8).fill(-1); vals[S.small.channels[name]] = v;
+  send(`T ${Math.round(ms)} ` + vals.map(x => x >= 0 ? x.toFixed(1) : '-1').join(' '));
+}
+function showErr(m) { $('err').textContent = m; clearTimeout(showErr.t); showErr.t = setTimeout(() => $('err').textContent = '', 4000); }
+
+let moveId = 0;
+const sleepMs = ms => new Promise(r => setTimeout(r, ms));
+function keys(name) {
+  const t = { ...target }, lv = S.levels;
+  const rep = (a, n) => Array(n).fill(a).flat();
+  return {
+    wake: [[{ lean: lv[0][0], fore: lv[0][1], trim: -20 }, 1500], [{ lean: lv[2][0], fore: lv[2][1], trim: 15 }, 2500], [{ trim: 0 }, 900], [{ yaw: -35 }, 1400], [{ yaw: 25 }, 1800], [{ yaw: 0 }, 1200]],
+    sleep: [[{ yaw: 0, lean: lv[0][0], fore: lv[0][1], trim: 0 }, 3000], [{ trim: -35 }, 1800]],
+    nod: [...rep([[{ trim: t.trim + 15 }, 350], [{ trim: t.trim - 10 }, 350]], 3), [{ trim: t.trim }, 400]],
+    shake: [...rep([[{ yaw: t.yaw - 18 }, 350], [{ yaw: t.yaw + 18 }, 450]], 3), [{ yaw: t.yaw }, 400]],
+    look: [[{ trim: t.trim + 10, yaw: -50 }, 2000], [{ yaw: 50 }, 3500], [{ yaw: t.yaw, trim: t.trim }, 2000]],
+    stretch: [[{ lean: lv[3][0], fore: lv[3][1], trim: 25 }, 2500], [{ trim: -10 }, 1200], [{ trim: 0 }, 900]]
+  }[name];
+}
+async function runMove(name) {
+  const id = ++moveId;
+  for (const [p, ms] of keys(name)) { if (id !== moveId) return; go(p, ms); await sleepMs(ms); }
+}
+
+// ---------- UI ----------
+function build() {
+  $('levels').innerHTML = S.levels.map((_, i) => `<button data-l="${i}">${i + 1}</button>`).join('');
+  $('levels').querySelectorAll('button').forEach(b => b.onclick = () => { moveId++; const [lean, fore] = S.levels[+b.dataset.l]; go({ lean, fore }); });
+  $('moves').innerHTML = ['wake', 'sleep', 'nod', 'shake', 'look', 'stretch'].map(m => `<button data-m="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('') + '<button data-m="stop">Stop</button>';
+  $('moves').querySelectorAll('button').forEach(b => b.onclick = () => b.dataset.m === 'stop' ? moveId++ : runMove(b.dataset.m));
+  $('sliders').innerHTML = [...JOINTS, ...SMALL].map(j => `<label class="sl"><span>${NAMES[j]} <small style="color:var(--dim)">ch${j in S.channels ? S.channels[j] : S.small.channels[j]}</small></span><input type="range" id="s-${j}" min="0" max="180" step="1"><output id="o-${j}"></output></label>`).join('');
+  [...JOINTS, ...SMALL].forEach(j => {
+    const el = $('s-' + j);
+    el.value = j in small ? small[j] : toSv[j];
+    el.oninput = () => $('o-' + j).textContent = el.value;
+    el.onchange = () => {
+      moveId++;
+      if (SMALL.includes(j)) return setSmall(j, +el.value);
+      const sv = { ...toSv, [j]: +el.value }, p = poseFor(sv);
+      if (j === 'upper' || j === 'pushrod') { const e = check(p); if (e) { showErr('Refused: ' + e); el.value = toSv[j]; return; } }
+      target = { yaw: p.yaw, lean: p.lean, fore: p.fore, trim: p.trim }; goServos(sv);
+    };
+  });
+  const SP = { base: 'Base turn', upper: 'Upper arm', pushrod: 'Push rod', head: 'Head', iris: 'Iris', camera: 'Camera (both)' };
+  $('speeds').innerHTML = Object.keys(SP).map(k => `<label class="f">${SP[k]}<input type="number" id="sp-${k}" min="1" max="300" value="${S.speeds[k]}"></label>`).join('');
+  $('dirs').innerHTML = JOINTS.map(j => `<label class="f"><span><input type="checkbox" id="inv-${j}" ${S.invert[j] ? 'checked' : ''}> ${NAMES[j]} reversed</span></label>`).join('') +
+    `<label class="f"><span><input type="checkbox" id="gimbal" ${S.head.gimbal ? 'checked' : ''}> Head gimbal</span></label>`;
+}
+build();
+const saveS = () => { try { localStorage.setItem('halo-settings', JSON.stringify(S)); } catch (e) {} };
+$('save').onclick = () => {
+  Object.keys(S.speeds).forEach(k => S.speeds[k] = Math.max(1, +$('sp-' + k).value || 1));
+  JOINTS.forEach(j => S.invert[j] = $('inv-' + j).checked); S.head.gimbal = $('gimbal').checked;
+  saveS(); $('saved').textContent = ' Saved ' + new Date().toLocaleTimeString();
+  goServos(servosFor(target));
+};
+$('iris-open').onclick = () => setSmall('iris', S.small.iris_open);
+$('iris-close').onclick = () => setSmall('iris', S.small.iris_closed);
+$('iris-save-open').onclick = () => { S.small.iris_open = small.iris; saveS(); showErr('Saved: iris open = ' + small.iris); };
+$('iris-save-close').onclick = () => { S.small.iris_closed = small.iris; saveS(); showErr('Saved: iris closed = ' + small.iris); };
+$('release').onclick = () => { moveId++; send('X'); };
+
+// live readout + 3D
+const bench = $('bench');
+setInterval(() => {
+  const sv = currentServos(), P = poseFor(sv);
+  $('chips').innerHTML = JOINTS.map(j => `<span>${NAMES[j]} <b>${Math.round(sv[j])}</b></span>`).join('') + `<span>elbow <b>${Math.round(P.fore - P.lean)}°</b></span>` +
+    SMALL.map(j => `<span>${NAMES[j]} <b>${Math.round(small[j])}</b></span>`).join('');
+  JOINTS.forEach(j => { const el = $('s-' + j); if (document.activeElement !== el) { el.value = toSv[j]; $('o-' + j).textContent = Math.round(toSv[j]); } });
+  SMALL.forEach(j => { const el = $('s-' + j); if (document.activeElement !== el) { el.value = small[j]; $('o-' + j).textContent = Math.round(small[j]); } });
+  bench.contentWindow && bench.contentWindow.postMessage({ type: 'halo-pose', pose: { yaw: P.yaw, t1: P.lean, t2: P.fore, aim: P.aim } }, '*');
+}, 100);
+</script>
+</body>
+</html>
