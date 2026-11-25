@@ -84,11 +84,29 @@ class SerialLink:
             raise RuntimeError("pyserial is not installed (pip install pyserial)")
         if not port:
             raise RuntimeError("no port picked. Plug in the ESP32 and press the refresh button")
-        s = serial.Serial(port, 115200, timeout=0.05)
-        time.sleep(1.8)               # the ESP32 resets when the port opens
+        s = serial.Serial()
+        s.port, s.baudrate, s.timeout = port, 115200, 0.05
+        s.dtr = False                 # keep GPIO0 high so the ESP32 never boots into "download mode"
+        s.rts = False
+        s.open()
+        try:
+            s.rts = True              # tap EN (reset) once so the firmware starts fresh...
+            time.sleep(0.12)
+            s.rts = False             # ...and let it run
+        except OSError:               # some USB adapters can't do this; fine
+            pass
+        time.sleep(1.8)
         with self.lock:
             self.ser, self.port = s, port
         self._note("connected to " + port)
+        self.send("?")                # the firmware answers "HALO OK ..."
+        for _ in range(15):
+            time.sleep(0.1)
+            after = self.log[max(i for i, l in enumerate(self.log) if l.endswith("> ?")):]
+            if any("HALO" in l for l in after):
+                return
+        self._note("! The ESP32 is not answering. Upload firmware/HaloJr_firmware once, "
+                   "close the Arduino IDE, then press EN on the ESP32 and Connect again.")
 
     def disconnect(self):
         with self.lock:
