@@ -87,18 +87,18 @@ const JOINTS = ['base', 'upper', 'pushrod', 'head'];
 const SMALL = ['iris', 'cam_pan', 'cam_tilt'];
 const NAMES = { base: 'Base turn', upper: 'Upper arm', pushrod: 'Push rod', head: 'Head', iris: 'Iris', cam_pan: 'Camera left/right', cam_tilt: 'Camera up/down' };
 const DEFAULTS = {
-  channels: { base: 0, upper: 1, pushrod: 2, head: 3 },
+  channels: { base: 0, upper: 2, pushrod: 4, head: 6 },
   invert: { base: false, upper: true, pushrod: false, head: false },
   offsets: { base: 90, upper: 50, pushrod: 10 },
   head: { center: 90, fore_at_level1: -10, gimbal: true },
   limits: { yaw: [-90, 90], lean: [-50, 100], fore: [-10, 170], elbow: [15, 135], trim: [-60, 60] },
   pulse: { min: 500, max: 2400 }, min_move_ms: 1500,
   levels: [[-50, -10], [-35, 5], [-20, 20], [-5, 35], [10, 50], [25, 65], [40, 80]],
-  small: { channels: { iris: 4, cam_pan: 5, cam_tilt: 6 }, iris_open: 60, iris_closed: 120 },
+  small: { channels: { iris: 8, cam_pan: 10, cam_tilt: 12 }, iris_open: 60, iris_closed: 120 },
   speeds: { base: 10, upper: 10, pushrod: 10, head: 10, iris: 60, camera: 60 }
 };
 let S = JSON.parse(JSON.stringify(DEFAULTS));
-try { const m = JSON.parse(localStorage.getItem('halo-settings') || 'null'); if (m) for (const k in m) S[k] = (typeof m[k] === 'object' && !Array.isArray(m[k])) ? { ...S[k], ...m[k] } : m[k]; } catch (e) {}
+try { const m = JSON.parse(localStorage.getItem('halo-settings-v2') || 'null'); if (m) for (const k in m) S[k] = (typeof m[k] === 'object' && !Array.isArray(m[k])) ? { ...S[k], ...m[k] } : m[k]; } catch (e) {}
 
 // ---------- maths (same as lamp.py) ----------
 const inv = (j, a) => S.invert[j] ? 180 - a : a;
@@ -200,7 +200,7 @@ function goServos(sv, ms) {
   const groups = {};
   JOINTS.forEach(j => (groups[Math.round(msj[j])] ||= []).push(j));
   for (const ms2 in groups) {
-    const vals = Array(8).fill(-1);
+    const vals = Array(16).fill(-1);
     groups[ms2].forEach(j => vals[S.channels[j]] = sv[j]);
     send(`T ${ms2} ` + vals.map(v => v >= 0 ? v.toFixed(1) : '-1').join(' '));
   }
@@ -211,7 +211,7 @@ function setSmall(name, v, ms) {
   v = clamp(+v, 0, 180);
   if (ms == null) ms = Math.abs(v - small[name]) / speedOf(name === 'iris' ? 'iris' : 'camera') * 1000;
   small[name] = v;
-  const vals = Array(8).fill(-1); vals[S.small.channels[name]] = v;
+  const vals = Array(16).fill(-1); vals[S.small.channels[name]] = v;
   send(`T ${Math.round(ms)} ` + vals.map(x => x >= 0 ? x.toFixed(1) : '-1').join(' '));
 }
 function showErr(m) { $('err').textContent = m; clearTimeout(showErr.t); showErr.t = setTimeout(() => $('err').textContent = '', 4000); }
@@ -260,7 +260,7 @@ function build() {
     `<label class="f"><span><input type="checkbox" id="gimbal" ${S.head.gimbal ? 'checked' : ''}> Head gimbal</span></label>`;
 }
 build();
-const saveS = () => { try { localStorage.setItem('halo-settings', JSON.stringify(S)); } catch (e) {} };
+const saveS = () => { try { localStorage.setItem('halo-settings-v2', JSON.stringify(S)); } catch (e) {} };
 $('save').onclick = () => {
   Object.keys(S.speeds).forEach(k => S.speeds[k] = Math.max(1, +$('sp-' + k).value || 1));
   JOINTS.forEach(j => S.invert[j] = $('inv-' + j).checked); S.head.gimbal = $('gimbal').checked;

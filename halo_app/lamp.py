@@ -18,6 +18,7 @@ SETTINGS_FILE = os.path.join(HERE, "settings.json")            # your saved sett
 DEFAULTS_FILE = os.path.join(HERE, "settings.default.json")    # defaults that come with updates
 JOINTS = ["base", "upper", "pushrod", "head"]
 SMALL = ["iris", "cam_pan", "cam_tilt"]
+NCH = 16          # PCA9685 has 16 channels (0-15)
 
 
 def clamp(v, lo, hi):
@@ -32,6 +33,11 @@ def load_settings():
     if os.path.exists(SETTINGS_FILE):
         with open(SETTINGS_FILE) as f:
             mine = json.load(f)
+        if mine.get("pinout") != s.get("pinout"):          # wiring changed in an update: take the new channel numbers
+            mine.pop("channels", None)
+            if isinstance(mine.get("small"), dict):
+                mine["small"].pop("channels", None)
+            mine["pinout"] = s.get("pinout")
         for k, v in mine.items():
             if isinstance(v, dict) and isinstance(s.get(k), dict):
                 s[k] = {**s[k], **v}
@@ -241,7 +247,7 @@ class Lamp:
         for j in JOINTS:
             groups.setdefault(int(ms_by_joint[j]), []).append(j)
         for ms, joints in groups.items():
-            vals = [-1] * 8
+            vals = [-1] * NCH
             for j in joints:
                 vals[ch[j]] = sv[j]
             self.link.send("T %d %s" % (ms, " ".join("%.1f" % v if v >= 0 else "-1" for v in vals)))
@@ -290,7 +296,7 @@ class Lamp:
             d = abs(v - self.small[name])
             ms = d / self.speed_of("iris" if name == "iris" else "camera") * 1000
         self.small[name] = v
-        vals = [-1] * 8
+        vals = [-1] * NCH
         vals[self.s["small"]["channels"][name]] = v
         self.link.send("T %d %s" % (ms, " ".join("%.1f" % x if x >= 0 else "-1" for x in vals)))
 

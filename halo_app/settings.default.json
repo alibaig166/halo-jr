@@ -1,9 +1,9 @@
 {
   "channels": {
     "base": 0,
-    "upper": 1,
-    "pushrod": 2,
-    "head": 3
+    "upper": 2,
+    "pushrod": 4,
+    "head": 6
   },
   "invert": {
     "base": false,
@@ -103,9 +103,9 @@
   "serial_port": "",
   "small": {
     "channels": {
-      "iris": 4,
-      "cam_pan": 5,
-      "cam_tilt": 6
+      "iris": 8,
+      "cam_pan": 10,
+      "cam_tilt": 12
     },
     "start": {
       "iris": 90,
@@ -142,5 +142,6 @@
     "always_listen": true,
     "stt": "whisper",
     "whisper_model": "base.en"
-  }
+  },
+  "pinout": 2
 }

@@ -159,7 +159,7 @@ table.lv input { width: 64px; }
           <label class="slider" id="s-upper-l">Upper arm <output id="o-s-upper"></output><input type="range" id="s-upper" min="0" max="180" step="1"></label>
           <label class="slider" id="s-pushrod-l">Push rod <output id="o-s-pushrod"></output><input type="range" id="s-pushrod" min="0" max="180" step="1"></label>
           <label class="slider" id="s-head-l">Head <output id="o-s-head"></output><input type="range" id="s-head" min="0" max="180" step="1"></label>
-          <h2 style="margin-top:8px">Head small servos (ch4 iris, ch5 camera left/right, ch6 camera up/down)</h2>
+          <h2 style="margin-top:8px">Head small servos (iris, camera left/right, camera up/down)</h2>
           <label class="slider">Iris <output id="o-s-iris"></output><input type="range" id="s-iris" min="0" max="180" step="1"></label>
           <div class="row">
             <button id="iris-open">Iris open</button><button id="iris-close">Iris close</button>
@@ -230,15 +230,21 @@ table.lv input { width: 64px; }
             <span>Last gesture action</span><b id="v-act">—</b>
             <span>Camera</span><b id="v-fps">off</b>
           </div>
-          <p class="note">Follow moves the two camera servos (ch5 left/right, ch6 up/down) to keep your face in the middle, same as face_follow_test.py. Hold a hand sign still for about half a second: open palm = light on/off, thumbs up = nod, thumbs down = shake, fist = sleep / wake.</p>
+          <p class="note">Follow moves the two camera servos (left/right and up/down) to keep your face in the middle, same as face_follow_test.py. Hold a hand sign still for about half a second: open palm = light on/off, thumbs up = nod, thumbs down = shake, fist = sleep / wake.</p>
         </section>
       </div>
 
       <!-- SETTINGS -->
       <div class="pane" id="tab-settings" hidden>
         <section style="display:grid;gap:8px">
+          <h2>Wiring (PCA9685 servo driver)</h2>
+          <div id="pinout"></div>
+          <p class="note">Every plug: brown → GND (edge of the board), red → V+, orange → PWM. Change a channel below and press Save; the picture updates.</p>
+        </section>
+        <section style="display:grid;gap:8px">
           <h2>Channels and directions</h2>
           <div class="grid2" id="set-ch"></div>
+          <div class="grid2" id="set-ch-small"></div>
         </section>
         <section style="display:grid;gap:8px">
           <h2>Zero offsets</h2>
@@ -568,9 +574,33 @@ $('follow').onclick = () => api('/api/camera', { follow: !(ST && ST.vision.follo
 $('gestures').onclick = () => api('/api/camera', { gestures: !(ST && ST.vision.gestures) }).catch(e => $('cam-err').textContent = e.message);
 
 // ---------- settings ----------
+const SMALLNAMES = { iris: 'Iris', cam_pan: 'Camera left/right', cam_tilt: 'Camera up/down' };
+function drawPinout() {
+  // a picture of the PCA9685: 16 channels, the used ones lit up, plus a plain list
+  const who = {};
+  JOINTS.forEach(j => who[S.channels[j]] = NAMES[j]);
+  Object.entries(SMALLNAMES).forEach(([k, nm]) => who[S.small.channels[k]] = nm);
+  const cw = 34, x0 = 64, y0 = 58, W = x0 + 16 * cw + 30;
+  let g = `<svg viewBox="0 0 ${W} 150" style="width:100%;height:auto;font-family:system-ui" role="img" aria-label="PCA9685 channel map">`;
+  g += `<rect x="8" y="8" width="${W - 16}" height="134" rx="12" fill="#1f5f3a" stroke="#2f8a55"/>`;
+  g += `<text x="${W / 2}" y="132" fill="#cfe9d8" text-anchor="middle" font-size="13">PCA9685 servo driver · pins seen from above</text>`;
+  ['GND', 'V+', 'PWM'].forEach((r, ri) => g += `<text x="${x0 - 12}" y="${y0 + ri * 20 + 5}" fill="#cfe9d8" text-anchor="end" font-size="12">${r}</text>`);
+  const cols = ['#4a3420', '#d64532', '#f0a030'];
+  for (let c = 0; c < 16; c++) {
+    const x = x0 + c * cw, used = c in who;
+    for (let ri = 0; ri < 3; ri++) g += `<rect x="${x}" y="${y0 + ri * 20 - 7}" width="14" height="14" rx="3" fill="${used ? cols[ri] : '#123522'}" stroke="#9fd3b3" stroke-width=".8"/>`;
+    g += `<text x="${x + 7}" y="${y0 - 18}" fill="${used ? '#fff' : '#6f9e82'}" text-anchor="middle" font-size="${used ? 15 : 12}" font-weight="${used ? 700 : 400}">${c}</text>`;
+  }
+  g += `</svg>`;
+  const rows = Object.keys(who).map(Number).sort((a, b) => a - b)
+    .map(c => `<tr><td style="padding:4px 10px 4px 0;color:var(--pla);font-weight:700">ch ${c}</td><td style="padding:4px 0">${who[c]}</td></tr>`).join('');
+  $('pinout').innerHTML = g + `<table style="margin-top:8px;font-size:14px;border-collapse:collapse">${rows}</table>`;
+}
 const SPEEDS = ['base', 'upper', 'pushrod', 'head', 'iris', 'camera'];
 function fillSettings() {
-  $('set-ch').innerHTML = JOINTS.map(j => `<label class="field">${NAMES[j]} channel<input type="number" id="ch-${j}" min="0" max="7" value="${S.channels[j]}"></label>
+  drawPinout();
+  $('set-ch-small').innerHTML = Object.entries(SMALLNAMES).map(([k, nm]) => `<label class="field">${nm} channel<input type="number" id="ch-${k}" min="0" max="15" value="${S.small.channels[k]}"></label>`).join('');
+  $('set-ch').innerHTML = JOINTS.map(j => `<label class="field">${NAMES[j]} channel<input type="number" id="ch-${j}" min="0" max="15" value="${S.channels[j]}"></label>
     <label class="check" style="align-self:end"><input type="checkbox" id="inv-${j}" ${S.invert[j] ? 'checked' : ''}> Reversed</label>`).join('');
   $('off-base').value = S.offsets.base; $('off-upper').value = S.offsets.upper; $('off-pushrod').value = S.offsets.pushrod;
   $('head-center').value = S.head.center; $('gimbal').checked = S.head.gimbal;
@@ -586,12 +616,16 @@ $('save').onclick = async () => {
   const n = id => +$(id).value;
   const s = JSON.parse(JSON.stringify(S));
   JOINTS.forEach(j => { s.channels[j] = n('ch-' + j); s.invert[j] = $('inv-' + j).checked; });
+  Object.keys(SMALLNAMES).forEach(k => s.small.channels[k] = n('ch-' + k));
+  const used = [...JOINTS.map(j => s.channels[j]), ...Object.values(s.small.channels)];
+  if (used.some(c => c < 0 || c > 15)) { $('saved').textContent = 'Channels must be 0 to 15.'; return; }
+  if (new Set(used).size !== used.length) { $('saved').textContent = 'Two servos are on the same channel.'; return; }
   s.offsets = { base: n('off-base'), upper: n('off-upper'), pushrod: n('off-pushrod') };
   s.head.center = n('head-center'); s.head.gimbal = $('gimbal').checked;
   s.speeds = Object.fromEntries(SPEEDS.map(k => [k, Math.max(1, n('sp-' + k))])); s.min_move_ms = n('minms'); s.pulse = { min: n('pmin'), max: n('pmax') };
   s.levels = s.levels.map((_, i) => [n(`lv-${i}-0`), n(`lv-${i}-1`)]);
   Object.assign(s.tracking, { gain: n('t-gain'), deadzone: n('t-dz'), smooth: n('t-smooth'), max_speed: n('t-max'), pan_invert: $('t-pan').checked, tilt_invert: $('t-tilt').checked });
-  try { await api('/api/settings', s); S = s; buildControls(); $('saved').textContent = 'Saved ' + new Date().toLocaleTimeString(); }
+  try { await api('/api/settings', s); S = s; buildControls(); drawPinout(); $('saved').textContent = 'Saved ' + new Date().toLocaleTimeString(); }
   catch (e) { $('saved').textContent = e.message; }
 };
 

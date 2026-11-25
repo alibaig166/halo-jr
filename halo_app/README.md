@@ -35,12 +35,12 @@ Open **http://localhost:5050** in Chrome, pick the `/dev/cu.usbserial-…` port,
 | SDA / SCL | ESP32 D21 / D22 |
 | V+ | 6.5 V buck + (thick wire), buck − to GND |
 | ch0 | base turn |
-| ch1 | upper arm |
-| ch2 | push rod |
-| ch3 | head |
-| ch4 | iris (MG90S) |
-| ch5 | camera left/right (MG90S) |
-| ch6 | camera up/down (MG90S) |
+| ch2 | upper arm |
+| ch4 | push rod |
+| ch6 | head |
+| ch8 | iris (MG90S) |
+| ch10 | camera left/right (MG90S) |
+| ch12 | camera up/down (MG90S) |
 
 Optional light: logic-level MOSFET gate on ESP32 **GPIO 25** (brightness from the page).
 

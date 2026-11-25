@@ -19,7 +19,7 @@
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
 
-const int NCH = 8;
+const int NCH = 16;
 const int LIGHT_PIN = 25;          // optional: gate of a logic-level MOSFET driving the lamp LED
 
 int pulseMin = 500, pulseMax = 2400;
@@ -97,7 +97,7 @@ void handle(String s) {
   } else if (c == 'R') {
     report();
   } else if (c == '?') {
-    Serial.println("HALO OK v1");
+    Serial.println("HALO OK v2");
   } else {
     Serial.println("ERR ?");
   }
@@ -115,14 +115,14 @@ void setup() {
   ledcAttach(LIGHT_PIN, 5000, 8);   // ESP32 Arduino core 3.x / 4.x
   ledcWrite(LIGHT_PIN, 0);
   for (int i = 0; i < NCH; i++) { active[i] = false; moving[i] = false; }
-  Serial.println(found ? "HALO OK v1 (PCA9685 found)" : "HALO OK v1 (PCA9685 NOT FOUND - check SDA D21, SCL D22, VCC 3V3, GND)");
+  Serial.println(found ? "HALO OK v2 (PCA9685 found)" : "HALO OK v2 (PCA9685 NOT FOUND - check SDA D21, SCL D22, VCC 3V3, GND)");
 }
 
 void loop() {
   while (Serial.available()) {
     char ch = Serial.read();
     if (ch == '\n') { handle(line); line = ""; }
-    else if (ch != '\r' && line.length() < 120) line += ch;
+    else if (ch != '\r' && line.length() < 240) line += ch;
   }
   unsigned long now = millis();
   if (now - lastTick >= 10) {
