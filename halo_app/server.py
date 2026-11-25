@@ -7,6 +7,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 
 from lamp import JOINTS, SMALL, Lamp, SerialLink, save_settings
 from vision import Vision
+from wiz import WizBulb
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(HERE, "static"), static_url_path="/static")
@@ -46,7 +47,7 @@ def get_settings():
 @app.post("/api/settings")
 def set_settings():
     new = request.get_json(force=True)
-    for key in ("channels", "invert", "offsets", "head", "limits", "pulse", "levels", "tracking", "light", "gestures", "small"):
+    for key in ("channels", "invert", "offsets", "head", "limits", "pulse", "levels", "tracking", "light", "gestures", "small", "wiz"):
         if key in new and not isinstance(new[key], type(lamp.s[key])):
             return bad("bad value for " + key)
     lamp.s.update(new)
@@ -136,6 +137,25 @@ def iris():
         save_settings(lamp.s)
     else:
         lamp.iris(bool(body.get("open")))
+    return ok()
+
+
+@app.post("/api/wiz")
+def wiz():
+    """find = list bulbs on the Wi-Fi; ip/mode/temp/color = change and save; test = ask the bulb."""
+    body = request.get_json(force=True)
+    if body.get("find"):
+        return ok(bulbs=WizBulb.find())
+    w = lamp.s.setdefault("wiz", {})
+    for k in ("ip", "mode", "temp", "color"):
+        if k in body:
+            w[k] = body[k]
+    save_settings(lamp.s)
+    lamp.light()
+    if body.get("test"):
+        lamp.wiz.ip = w.get("ip", "")
+        if not lamp.wiz.test():
+            return bad("WiZ bulb did not answer at %s: %s" % (w.get("ip") or "(no IP)", lamp.wiz.error))
     return ok()
 
 

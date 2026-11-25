@@ -1,5 +1,7 @@
 """Halo Jr. lamp logic: settings, pose <-> servo maths, moves, and the USB link to the ESP32."""
 import json
+
+from wiz import WizBulb
 import math
 import os
 import threading
@@ -155,6 +157,7 @@ class Lamp:
         self.move_stop = threading.Event()
         self.status = "ready"
         self.sent_once = False
+        self.wiz = WizBulb()
         self.small = dict(self.s["small"]["start"])
 
     # ---------- maths ----------
@@ -305,6 +308,10 @@ class Lamp:
         if brightness is not None:
             self.brightness = int(clamp(brightness, 0, 255))
         self.link.send("L %d" % (self.brightness if self.light_on else 0))
+        # the Philips WiZ bulb follows the same on/off and brightness
+        w = self.s.get("wiz", {})
+        self.wiz.ip = w.get("ip", "")
+        self.wiz.apply(self.light_on, self.brightness, w.get("mode", "temp"), w.get("temp", 2700), w.get("color", "#ffb060"))
 
     def release(self):
         self.stop_move()

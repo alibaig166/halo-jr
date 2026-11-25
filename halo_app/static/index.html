@@ -129,6 +129,21 @@ table.lv input { width: 64px; }
             <button id="light">Light off</button>
             <label class="slider" style="flex:1">Brightness <output id="o-bri"></output><input type="range" id="bri" min="0" max="255" step="1"></label>
           </div>
+          <h2 style="margin-top:12px">Philips WiZ bulb</h2>
+          <div class="row" style="align-items:center">
+            <input id="wiz-ip" placeholder="Bulb IP, e.g. 192.168.1.45" style="flex:1;min-width:160px">
+            <button id="wiz-find">Find bulb</button><button id="wiz-test">Test</button>
+          </div>
+          <div class="row" style="align-items:center;margin-top:8px">
+            <label><input type="radio" name="wiz-mode" value="temp"> White</label>
+            <label class="slider" style="flex:1">Warm ↔ cool <output id="o-wiz-temp"></output><input type="range" id="wiz-temp" min="2200" max="6500" step="100"></label>
+          </div>
+          <div class="row" style="align-items:center">
+            <label><input type="radio" name="wiz-mode" value="color"> Colour</label>
+            <input type="color" id="wiz-color">
+          </div>
+          <p class="err" id="wiz-msg"></p>
+          <p class="note">The bulb follows Light on/off and Brightness (also the open-palm gesture, Wake and Sleep). Same Wi-Fi as this computer, and in the WiZ app turn on Settings → Security → Allow local communication.</p>
         </section>
         <section class="row">
           <button class="danger" id="release">Release all servos (go limp)</button>
@@ -291,6 +306,32 @@ function buildControls() {
     dragging = null;
   });
 });
+// ---------- WiZ bulb ----------
+const wizMsg = (m, bad) => { $('wiz-msg').textContent = m; $('wiz-msg').style.color = bad ? '' : 'var(--ok, #3ccf7a)'; };
+async function wizSet(body) { try { await api('/api/wiz', body); if (S) { const { test, find, ...f } = body; S.wiz = { ...(S.wiz || {}), ...f }; } return true; } catch (e) { wizMsg(e.message, true); return false; } }
+function wizLoad(S) {
+  const w = S.wiz || {};
+  $('wiz-ip').value = w.ip || ''; $('wiz-temp').value = w.temp || 2700; $('o-wiz-temp').textContent = (w.temp || 2700) + 'K';
+  $('wiz-color').value = w.color || '#ffb060';
+  document.querySelectorAll('input[name=wiz-mode]').forEach(r => r.checked = r.value === (w.mode || 'temp'));
+}
+fetch('/api/settings').then(r => r.json()).then(wizLoad).catch(() => {});
+$('wiz-ip').addEventListener('change', () => wizSet({ ip: $('wiz-ip').value.trim() }));
+$('wiz-test').onclick = async () => { if (await wizSet({ ip: $('wiz-ip').value.trim(), test: true })) wizMsg('Bulb answered ✓'); };
+$('wiz-find').onclick = async () => {
+  wizMsg('Looking for bulbs…');
+  try {
+    const r = await api('/api/wiz', { find: true });
+    if (!r.bulbs.length) return wizMsg('No bulb answered. Same Wi-Fi? "Allow local communication" on in the WiZ app?', true);
+    $('wiz-ip').value = r.bulbs[0].ip; await wizSet({ ip: r.bulbs[0].ip });
+    wizMsg('Found: ' + r.bulbs.map(b => b.ip).join(', ') + (r.bulbs.length > 1 ? ' (using the first one)' : ''));
+  } catch (e) { wizMsg(e.message, true); }
+};
+$('wiz-temp').oninput = () => $('o-wiz-temp').textContent = $('wiz-temp').value + 'K';
+$('wiz-temp').onchange = () => { document.querySelector('input[name=wiz-mode][value=temp]').checked = true; wizSet({ mode: 'temp', temp: +$('wiz-temp').value }); };
+$('wiz-color').onchange = () => { document.querySelector('input[name=wiz-mode][value=color]').checked = true; wizSet({ mode: 'color', color: $('wiz-color').value }); };
+document.querySelectorAll('input[name=wiz-mode]').forEach(r => r.onchange = () => wizSet({ mode: r.value }));
+
 $('light').onclick = () => api('/api/light', { on: !(ST && ST.lamp.light.on) });
 $('bri').addEventListener('input', () => { dragging = $('bri'); $('o-bri').textContent = $('bri').value; });
 $('bri').addEventListener('change', () => { api('/api/light', { brightness: +$('bri').value }); dragging = null; });

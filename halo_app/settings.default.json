@@ -126,5 +126,11 @@
     "head": 10,
     "iris": 60,
     "camera": 60
+  },
+  "wiz": {
+    "ip": "",
+    "mode": "temp",
+    "temp": 2700,
+    "color": "#ffb060"
   }
 }
