@@ -62,7 +62,7 @@ def set_settings():
 
 @app.get("/api/ports")
 def ports():
-    return jsonify(SerialLink.ports())
+    return jsonify(SerialLink.ports(lamp.s.get("wifi_host", "192.168.4.1")))
 
 
 @app.post("/api/connect")
@@ -253,7 +253,7 @@ if __name__ == "__main__":
     if lamp.s.get("llm", {}).get("stt") == "whisper":
         ears.preload()                       # load Whisper now so the first sentence isn't slow
     port = lamp.s.get("serial_port")
-    if port and any(p["device"] == port for p in SerialLink.ports()):
+    if port and any(p["device"] == port for p in SerialLink.ports(lamp.s.get("wifi_host", "192.168.4.1"))) and not port.startswith("wifi://"):
         try:
             link.connect(port)
             lamp.resync()

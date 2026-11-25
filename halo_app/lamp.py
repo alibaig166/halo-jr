@@ -4,6 +4,7 @@ import json
 from wiz import WizBulb
 import math
 import os
+import socket
 import threading
 import time
 
@@ -53,6 +54,32 @@ def save_settings(s):
     os.replace(tmp, SETTINGS_FILE)
 
 
+class TcpLink:
+    """The ESP32 over Wi-Fi (TCP port 3333). Looks like a serial port to the rest of the app."""
+    def __init__(self, host, port=3333):
+        self.sock = socket.create_connection((host, port), timeout=3)
+        self.sock.settimeout(0.05)
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+    def read(self, n):
+        try:
+            data = self.sock.recv(n)
+        except socket.timeout:
+            return b""
+        if data == b"":
+            raise OSError("Wi-Fi connection closed")
+        return data
+
+    def write(self, data):
+        self.sock.sendall(data)
+
+    def close(self):
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
 class SerialLink:
     """USB serial connection to the ESP32. Without a port it runs as a simulator."""
 
@@ -65,10 +92,10 @@ class SerialLink:
         threading.Thread(target=self._reader, daemon=True).start()
 
     @staticmethod
-    def ports():
+    def ports(wifi_host="192.168.4.1"):
+        out = [{"device": "wifi://%s" % wifi_host, "desc": "Wi-Fi (HaloJr)"}]
         if serial is None:
-            return []
-        out = []
+            return out
         for p in serial.tools.list_ports.comports():
             name = p.device
             if "Bluetooth" in name or "debug-console" in name or "wlan-debug" in name:
@@ -84,6 +111,18 @@ class SerialLink:
             raise RuntimeError("pyserial is not installed (pip install pyserial)")
         if not port:
             raise RuntimeError("no port picked. Plug in the ESP32 and press the refresh button")
+        if port.startswith("wifi://"):
+            host = port[len("wifi://"):]
+            try:
+                s = TcpLink(host)
+            except OSError as e:
+                raise RuntimeError("can't reach the ESP32 at %s over Wi-Fi (%s). Is this laptop connected "
+                                   "to the \"HaloJr\" Wi-Fi (password halojr123)?" % (host, e))
+            with self.lock:
+                self.ser, self.port = s, port
+            self._note("connected over Wi-Fi to " + host)
+            self._hello()
+            return
         s = serial.Serial()
         s.port, s.baudrate, s.timeout = port, 115200, 0.05
         s.dtr = False                 # keep GPIO0 high so the ESP32 never boots into "download mode"
@@ -99,6 +138,9 @@ class SerialLink:
         with self.lock:
             self.ser, self.port = s, port
         self._note("connected to " + port)
+        self._hello()
+
+    def _hello(self):
         self.send("?")                # the firmware answers "HALO OK ..."
         for _ in range(15):
             time.sleep(0.1)
@@ -149,7 +191,13 @@ class SerialLink:
                 continue
             try:
                 data = s.read(256)
-            except Exception:
+            except Exception as e:
+                if isinstance(s, TcpLink):         # Wi-Fi dropped: show it as disconnected
+                    self._note("! lost the Wi-Fi connection to the ESP32 (%s)" % e)
+                    with self.lock:
+                        if self.ser is s:
+                            self.ser, self.port = None, ""
+                    s.close()
                 time.sleep(0.1)
                 continue
             if not data:

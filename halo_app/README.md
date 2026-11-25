@@ -28,6 +28,12 @@ python3 server.py
 ```
 Open **http://localhost:5050** in Chrome, pick the `/dev/cu.usbserial-…` port, click **Connect**.
 
+## Wi-Fi (no USB cable, no router)
+The ESP32 makes its own Wi-Fi: **HaloJr**, password **halojr123**. Connect the laptop to it, then pick
+**Wi-Fi: HaloJr (192.168.4.1)** in the app and press Connect. Works anywhere (no internet needed).
+Power the ESP32 from 5 V on VIN (or a USB charger) when the cable isn't plugged into the laptop.
+To also join a home router, put its name and password in `HOME_SSID` / `HOME_PASS` in the firmware.
+
 ## Wiring (same as before)
 | PCA9685 | Connect to |
 |---|---|

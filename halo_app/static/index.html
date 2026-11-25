@@ -313,9 +313,9 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
 async function loadPorts() {
   const ports = await api('/api/ports');
   const sel = $('port'), keep = sel.value || (S && S.serial_port);
-  sel.innerHTML = ports.length ? ports.map(p => `<option value="${p.device}">${p.device}</option>`).join('') : '<option value="">No ESP32 found</option>';
+  sel.innerHTML = ports.map(p => `<option value="${p.device}">${p.device.startsWith('wifi://') ? 'Wi-Fi: HaloJr (' + p.device.slice(7) + ')' : p.device}</option>`).join('');
   if (keep && ports.some(p => p.device === keep)) sel.value = keep;
-  else { const usb = ports.find(p => /usbserial|wchusb|SLAB|COM/i.test(p.device)); if (usb) sel.value = usb.device; }
+  else { const usb = ports.find(p => /usbserial|wchusb|SLAB|COM/i.test(p.device)); sel.value = usb ? usb.device : ports[0].device; }
 }
 $('refresh').onclick = loadPorts;
 $('connect').onclick = async () => {

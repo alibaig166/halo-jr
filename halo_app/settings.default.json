@@ -143,5 +143,6 @@
     "stt": "whisper",
     "whisper_model": "base.en"
   },
-  "pinout": 2
+  "pinout": 2,
+  "wifi_host": "192.168.4.1"
 }
