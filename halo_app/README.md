@@ -54,6 +54,13 @@ The first time, macOS asks to allow camera access for Terminal (System Settings 
 
 Face and gesture code come from the PAI-PROJECT `Testers/face_follow_test.py` and `Hand.ipynb`.
 
+## Talk to Halo (local AI with Ollama)
+1. Install Ollama from **ollama.com** and open it.
+2. In Terminal: `ollama pull qwen2.5:3b` (about 2 GB, once).
+3. Page → **Talk** tab: hold the button (or Space) and speak, or turn on **"Hey Halo"**.
+Halo answers out loud and can move itself, change the light and the WiZ colour.
+Use Chrome: voice recognition is Chrome's (needs internet); the AI runs on your laptop.
+
 ## Files
 | File | What it does |
 |---|---|

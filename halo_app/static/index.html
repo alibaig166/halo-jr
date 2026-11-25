@@ -99,6 +99,7 @@ table.lv input { width: 64px; }
         <button role="tab" data-tab="control" aria-selected="true">Control</button>
         <button role="tab" data-tab="servos" aria-selected="false">Servo test</button>
         <button role="tab" data-tab="camera" aria-selected="false">Camera</button>
+        <button role="tab" data-tab="talk" aria-selected="false">Talk</button>
         <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
       </div>
 
@@ -168,6 +169,36 @@ table.lv input { width: 64px; }
           <label class="slider">Camera up / down <output id="o-s-cam_tilt"></output><input type="range" id="s-cam_tilt" min="0" max="180" step="1"></label>
           <p class="err" id="servo-err"></p>
           <p class="note">Upper arm and push rod are checked: if a value would bend the elbow outside its range, the page refuses and says why. Moving the head here turns the gimbal off until the next level or move.</p>
+        </section>
+      </div>
+
+      <!-- TALK -->
+      <div class="pane" id="tab-talk" hidden>
+        <section style="display:grid;gap:10px">
+          <h2>Talk to Halo</h2>
+          <p class="note" id="llm-status">Checking Ollama…</p>
+          <div class="row" style="align-items:center">
+            <button class="primary" id="ptt" style="flex:1;padding:16px;font-size:16px">🎤 Hold to talk</button>
+            <button id="wake">"Hey Halo": off</button>
+          </div>
+          <p class="note" id="heard">&nbsp;</p>
+          <div id="chat" style="display:grid;gap:6px;max-height:300px;overflow:auto"></div>
+          <div class="row">
+            <input id="say" placeholder="…or type to Halo" style="flex:1;min-width:140px">
+            <button id="say-send">Send</button>
+          </div>
+          <p class="err" id="talk-err"></p>
+        </section>
+        <section style="display:grid;gap:8px">
+          <h2>Voice and brain</h2>
+          <div class="grid2">
+            <label class="field">Model (Ollama)<select id="llm-model" style="width:100%"></select></label>
+            <label class="field">Halo's voice<select id="voice" style="width:100%"></select></label>
+            <label class="field">Wake word<input id="wake-word"></label>
+            <label class="field">Language<select id="lang" style="width:100%"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-IN">English (India/Pakistan)</option><option value="ur-PK">Urdu</option></select></label>
+          </div>
+          <div class="row"><button id="llm-save">Save</button><button id="forget">Forget the conversation</button></div>
+          <p class="note">Speech-to-text uses Chrome's built-in recognition (needs internet); the AI itself runs on this computer in Ollama. Halo's answers play through this computer's speaker, so pick the lamp's Bluetooth speaker as the Mac's sound output.</p>
         </section>
       </div>
 
@@ -306,6 +337,96 @@ function buildControls() {
     dragging = null;
   });
 });
+// ---------- talk (voice -> Ollama -> voice) ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, wakeOn = false, holding = false, speaking = false, waitingCmd = false, LLM = {};
+const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+function bubble(who, text, extra) {
+  const d = document.createElement('div');
+  d.style.cssText = 'padding:8px 10px;border-radius:10px;max-width:90%;' + (who === 'me' ? 'justify-self:end;background:var(--pla);color:var(--pla-ink)' : 'border:1px solid var(--line)');
+  d.innerHTML = esc(text) + (extra ? '<div class="note" style="margin-top:4px">' + esc(extra) + '</div>' : '');
+  $('chat').appendChild(d); $('chat').scrollTop = 1e9;
+}
+function voices() { return speechSynthesis.getVoices().filter(v => v.lang.startsWith(($('lang').value || 'en').slice(0, 2))); }
+function fillVoices() {
+  const keep = (() => { try { return localStorage.getItem('halo-voice'); } catch (e) { return null; } })();
+  $('voice').innerHTML = voices().map(v => `<option${v.name === keep ? ' selected' : ''}>${esc(v.name)}</option>`).join('');
+}
+speechSynthesis.onvoiceschanged = fillVoices;
+function speak(text) {
+  if (!text) return;
+  const u = new SpeechSynthesisUtterance(text);
+  const v = speechSynthesis.getVoices().find(v => v.name === $('voice').value); if (v) u.voice = v;
+  u.lang = $('lang').value;
+  speaking = true; if (rec) try { rec.abort(); } catch (e) {}
+  u.onend = u.onerror = () => { speaking = false; if (wakeOn) startRec(true); };
+  speechSynthesis.cancel(); speechSynthesis.speak(u);
+}
+async function ask(text) {
+  text = text.trim(); if (!text) return;
+  bubble('me', text); $('talk-err').textContent = ''; $('heard').textContent = 'Thinking…';
+  try {
+    const r = await api('/api/chat', { text });
+    bubble('halo', r.reply, r.actions && r.actions.length ? '→ ' + r.actions.join(', ') : '');
+    speak(r.reply);
+  } catch (e) { $('talk-err').textContent = e.message; }
+  $('heard').innerHTML = '&nbsp;';
+}
+function wakeRe() { const w = ($('wake-word').value || 'hey halo').toLowerCase().replace(/^hey\s+/, ''); return new RegExp('\\b(?:hey|hi|ok|okay|a)?\\s*(?:' + w + '|hello|hallo|helo|haloo)\\b[,.!?]?\\s*(.*)$', 'i'); }
+function startRec(wake) {
+  if (!SR) { $('talk-err').textContent = 'Voice needs Google Chrome (or Edge).'; return; }
+  if (rec) try { rec.abort(); } catch (e) {}
+  rec = new SR(); rec.lang = $('lang').value; rec.interimResults = true; rec.continuous = !!wake;
+  let finalText = '';
+  rec.onresult = ev => {
+    let interim = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const t = ev.results[i][0].transcript;
+      if (!ev.results[i].isFinal) { interim += t; continue; }
+      if (!wake || holding) { finalText += t; continue; }
+      if (waitingCmd) { waitingCmd = false; ask(t); continue; }
+      const m = t.match(wakeRe());
+      if (m) {
+        if (m[1] && m[1].trim().length > 1) ask(m[1]);
+        else { waitingCmd = true; $('heard').textContent = 'Yes? I\'m listening…'; api('/api/move', { name: 'nod' }).catch(() => {}); setTimeout(() => { if (waitingCmd) { waitingCmd = false; $('heard').innerHTML = '&nbsp;'; } }, 8000); }
+      }
+    }
+    if (interim) $('heard').textContent = '“' + interim + '”';
+  };
+  rec.onerror = e => { if (e.error === 'not-allowed') { $('talk-err').textContent = 'Allow the microphone for this page (click the icon in the address bar).'; wakeOn = false; $('wake').textContent = '"Hey Halo": off'; } };
+  rec.onend = () => {
+    if (!wake && finalText) ask(finalText);
+    else if (wake && wakeOn && !speaking && !holding) setTimeout(() => wakeOn && !speaking && startRec(true), 250);
+  };
+  try { rec.start(); } catch (e) {}
+}
+const pttDown = e => { e.preventDefault(); holding = true; speechSynthesis.cancel(); speaking = false; $('ptt').textContent = '🎤 Listening… (let go to send)'; startRec(false); };
+const pttUp = () => { if (!holding) return; holding = false; $('ptt').textContent = '🎤 Hold to talk'; if (rec) try { rec.stop(); } catch (e) {} if (wakeOn) setTimeout(() => startRec(true), 600); };
+$('ptt').addEventListener('mousedown', pttDown); $('ptt').addEventListener('touchstart', pttDown, { passive: false });
+['mouseup', 'mouseleave', 'touchend'].forEach(ev => $('ptt').addEventListener(ev, pttUp));
+document.addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && document.activeElement.tagName !== 'INPUT' && !$('tab-talk').hidden) pttDown(e); });
+document.addEventListener('keyup', e => { if (e.code === 'Space' && !$('tab-talk').hidden) pttUp(); });
+$('wake').onclick = () => { wakeOn = !wakeOn; $('wake').textContent = '"Hey Halo": ' + (wakeOn ? 'on' : 'off'); $('wake').classList.toggle('on', wakeOn); if (wakeOn) startRec(true); else if (rec) try { rec.abort(); } catch (e) {} };
+$('say-send').onclick = () => { ask($('say').value); $('say').value = ''; };
+$('say').addEventListener('keydown', e => { if (e.key === 'Enter') $('say-send').onclick(); });
+$('forget').onclick = () => { api('/api/chat', { forget: true }); $('chat').innerHTML = ''; };
+$('lang').onchange = fillVoices;
+$('voice').onchange = () => { try { localStorage.setItem('halo-voice', $('voice').value); } catch (e) {} };
+async function llmLoad() {
+  const s = await api('/api/settings'); LLM = s.llm || {};
+  $('wake-word').value = LLM.wake_word || 'hey halo'; $('lang').value = LLM.lang || 'en-US'; fillVoices();
+  const r = await api('/api/llm').catch(e => ({ ok: false, error: e.message, models: [] }));
+  const models = [...new Set([...(r.models || []), LLM.model || 'qwen2.5:3b'])];
+  $('llm-model').innerHTML = models.map(m => `<option${m === LLM.model ? ' selected' : ''}>${esc(m)}</option>`).join('');
+  $('llm-status').textContent = r.ok ? ((r.models || []).includes(LLM.model) ? 'Ollama ready · ' + LLM.model : `Ollama is running, but ${LLM.model} isn't downloaded. In Terminal: ollama pull ${LLM.model}`) : r.error;
+  $('llm-status').style.color = r.ok && (r.models || []).includes(LLM.model) ? 'var(--ok)' : 'var(--warn)';
+}
+$('llm-save').onclick = async () => {
+  LLM = { ...LLM, model: $('llm-model').value, wake_word: $('wake-word').value.trim() || 'hey halo', lang: $('lang').value };
+  await api('/api/settings', { llm: LLM }); if (S) S.llm = LLM; llmLoad();
+};
+llmLoad().catch(() => {});
+
 // ---------- WiZ bulb ----------
 const wizMsg = (m, bad) => { $('wiz-msg').textContent = m; $('wiz-msg').style.color = bad ? '' : 'var(--ok, #3ccf7a)'; };
 async function wizSet(body) { try { await api('/api/wiz', body); if (S) { const { test, find, ...f } = body; S.wiz = { ...(S.wiz || {}), ...f }; } return true; } catch (e) { wizMsg(e.message, true); return false; } }

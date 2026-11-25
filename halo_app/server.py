@@ -8,6 +8,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 from lamp import JOINTS, SMALL, Lamp, SerialLink, save_settings
 from vision import Vision
 from wiz import WizBulb
+from brain import Brain
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(HERE, "static"), static_url_path="/static")
@@ -17,6 +18,7 @@ logging.getLogger("werkzeug").setLevel(logging.ERROR)   # stop printing every pa
 link = SerialLink()
 lamp = Lamp(link)
 vision = Vision(lamp)
+brain = Brain(lamp)
 
 
 def ok(**extra):
@@ -47,7 +49,7 @@ def get_settings():
 @app.post("/api/settings")
 def set_settings():
     new = request.get_json(force=True)
-    for key in ("channels", "invert", "offsets", "head", "limits", "pulse", "levels", "tracking", "light", "gestures", "small", "wiz"):
+    for key in ("channels", "invert", "offsets", "head", "limits", "pulse", "levels", "tracking", "light", "gestures", "small", "wiz", "llm"):
         if key in new and not isinstance(new[key], type(lamp.s[key])):
             return bad("bad value for " + key)
     lamp.s.update(new)
@@ -138,6 +140,27 @@ def iris():
     else:
         lamp.iris(bool(body.get("open")))
     return ok()
+
+
+@app.get("/api/llm")
+def llm_info():
+    m = brain.models()
+    if isinstance(m, str):
+        return jsonify({"ok": False, "error": m, "models": []})
+    return jsonify({"ok": True, "models": m, "model": lamp.s.get("llm", {}).get("model")})
+
+
+@app.post("/api/chat")
+def chat():
+    body = request.get_json(force=True)
+    if body.get("forget"):
+        brain.forget()
+        return ok()
+    try:
+        out = brain.chat(body.get("text", ""))
+    except RuntimeError as e:
+        return bad(str(e))
+    return ok(**out)
 
 
 @app.post("/api/wiz")
