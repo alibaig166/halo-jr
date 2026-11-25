@@ -59,7 +59,9 @@ Face and gesture code come from the PAI-PROJECT `Testers/face_follow_test.py` an
 2. In Terminal: `ollama pull qwen2.5:3b` (about 2 GB, once).
 3. Page → **Talk** tab: hold the button (or Space) and speak, or turn on **"Hey Halo"**.
 Halo answers out loud and can move itself, change the light and the WiZ colour.
-Use Chrome: voice recognition is Chrome's (needs internet); the AI runs on your laptop.
+Voice recognition: **Whisper** runs on your laptop with no internet. Install it once with
+`pip install -r requirements-voice.txt` and open the Talk tab once with internet so the model downloads
+(base is about 140 MB). If Whisper isn't installed the page falls back to Chrome's recognition (needs internet).
 
 ## Files
 | File | What it does |

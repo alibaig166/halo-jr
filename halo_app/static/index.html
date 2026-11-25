@@ -194,11 +194,13 @@ table.lv input { width: 64px; }
           <div class="grid2">
             <label class="field">Model (Ollama)<select id="llm-model" style="width:100%"></select></label>
             <label class="field">Halo's voice<select id="voice" style="width:100%"></select></label>
+            <label class="field">Speech recognition<select id="stt" style="width:100%"><option value="whisper">Whisper (offline, on this laptop)</option><option value="chrome">Chrome (needs internet)</option></select></label>
+            <label class="field">Whisper size<select id="wmodel" style="width:100%"><option value="tiny.en">tiny (fastest)</option><option value="base.en">base (good)</option><option value="small.en">small (best, slower)</option></select></label>
             <label class="field">Wake word (add spellings with commas)<input id="wake-word"></label>
             <label class="field">Language<select id="lang" style="width:100%"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-IN">English (India/Pakistan)</option><option value="ur-PK">Urdu</option></select></label>
           </div>
           <div class="row"><button id="llm-save">Save</button><button id="forget">Forget the conversation</button></div>
-          <p class="note">Speech-to-text uses Chrome's built-in recognition (needs internet); the AI itself runs on this computer in Ollama. Halo's answers play through this computer's speaker, so pick the lamp's Bluetooth speaker as the Mac's sound output.</p>
+          <p class="note">With Whisper everything runs on this laptop, no internet (the Whisper model downloads once the first time). Chrome recognition needs internet. The AI runs in Ollama on this laptop. Halo's answers play through this computer's speaker, so pick the lamp's Bluetooth speaker as the Mac's sound output.</p>
         </section>
       </div>
 
@@ -358,7 +360,7 @@ function speak(text) {
   const u = new SpeechSynthesisUtterance(text);
   const v = speechSynthesis.getVoices().find(v => v.name === $('voice').value); if (v) u.voice = v;
   u.lang = $('lang').value;
-  speaking = true; if (rec) try { rec.abort(); } catch (e) {}
+  speaking = true; if (rec) try { rec.abort(); } catch (e) {} W.buf = [];
   u.onend = u.onerror = () => { speaking = false; if (wakeOn) startRec(true); };
   speechSynthesis.cancel(); speechSynthesis.speak(u);
 }
@@ -379,7 +381,68 @@ function wakeRe() {
   if (words.includes('halo')) alts.push('hello', 'hallo', 'helo');
   return new RegExp('(?:^|\\b)(?:hey|hi|ok|okay|a)?[\\s,]*(?:' + alts.join('|') + ')\\.?\\b[,.!?]?\\s*(.*)$', 'i');
 }
+// ----- Whisper (offline): the page records the mic, cuts out each sentence, the laptop turns it into text -----
+const W = { ctx: null, stream: null, node: null, on: false, mode: 'wake', buf: [], pre: null, voicedMs: 0, silentMs: 0, noise: 0.004, busy: 0 };
+const useWhisper = () => (LLM.stt || 'chrome') === 'whisper';
+async function wStart(mode) {
+  try {
+    if (!W.stream) {
+      W.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      W.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = W.ctx.createMediaStreamSource(W.stream);
+      W.node = W.ctx.createScriptProcessor(2048, 1, 1);
+      src.connect(W.node); W.node.connect(W.ctx.destination);
+      W.node.onaudioprocess = wChunk;
+    }
+    if (W.ctx.state === 'suspended') await W.ctx.resume();
+  } catch (e) { $('talk-err').textContent = 'Allow the microphone for this page (click the icon in the address bar).'; setWake(false); return; }
+  W.mode = mode; W.buf = []; W.voicedMs = 0; W.silentMs = 0; W.on = true;
+}
+function wStop(send) { const b = W.buf; W.on = false; W.buf = []; if (send && b.length) wSend(b, false); }
+function wChunk(e) {
+  const out = e.outputBuffer.getChannelData(0); out.fill(0);        // never play the mic back
+  if (!W.on || speaking) { W.buf = []; return; }
+  const x = new Float32Array(e.inputBuffer.getChannelData(0));
+  const ms = x.length / W.ctx.sampleRate * 1000;
+  if (W.mode === 'hold') { W.buf.push(x); return; }
+  let s = 0; for (let i = 0; i < x.length; i++) s += x[i] * x[i];
+  const rms = Math.sqrt(s / x.length), thr = Math.max(0.012, W.noise * 3.5), loud = rms > thr;
+  if (!loud && !W.buf.length) { W.noise = W.noise * 0.97 + rms * 0.03; W.pre = x; return; }   // learn the room's noise
+  if (!W.buf.length && W.pre) W.buf.push(W.pre);                                             // keep the start of the word
+  W.buf.push(x);
+  if (loud) { W.voicedMs += ms; W.silentMs = 0; } else W.silentMs += ms;
+  const total = W.buf.length * ms;
+  if (W.silentMs > 800 || total > 12000) {
+    const b = W.buf; W.buf = []; const voiced = W.voicedMs; W.voicedMs = 0; W.silentMs = 0;
+    if (voiced > 300) wSend(b, true);
+  }
+}
+async function wSend(chunks, wake) {
+  const rate = W.ctx.sampleRate, n = chunks.reduce((a, c) => a + c.length, 0);
+  const all = new Float32Array(n); let o = 0; chunks.forEach(c => { all.set(c, o); o += c.length; });
+  const step = rate / 16000, len = Math.floor(n / step), pcm = new Int16Array(len);       // to 16 kHz, 16-bit
+  for (let i = 0; i < len; i++) pcm[i] = Math.max(-1, Math.min(1, all[Math.floor(i * step)])) * 32767;
+  W.busy++; if (!wake) $('heard').textContent = 'Understanding…';
+  try {
+    const r = await fetch('/api/stt', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pcm.buffer }).then(r => r.json());
+    if (!r.ok) { $('talk-err').textContent = r.error; return; }
+    if (r.text) onHeard(r.text, wake); else if (!wake) $('heard').innerHTML = '&nbsp;';
+  } catch (e) { $('talk-err').textContent = e.message; }
+  finally { W.busy--; }
+}
+function onHeard(t, wake) {
+  if (!wake) return ask(t);
+  if (waitingCmd) { waitingCmd = false; return ask(t); }
+  const m = t.match(wakeRe());
+  if (m) {
+    if (m[1] && m[1].trim().length > 1) ask(m[1]);
+    else { waitingCmd = true; $('heard').textContent = 'Yes? I\'m listening…'; api('/api/move', { name: 'nod' }).catch(() => {}); setTimeout(() => { if (waitingCmd) { waitingCmd = false; $('heard').innerHTML = '&nbsp;'; } }, 8000); }
+  } else $('heard').textContent = 'Heard: “' + t.trim() + '” (say “' + ($('wake-word').value || 'hey gwm') + '” first)';
+}
+function stopRec() { if (rec) try { rec.abort(); } catch (e) {} wStop(false); }
 function startRec(wake) {
+  if (useWhisper()) { if (rec) try { rec.abort(); } catch (e) {} wStart(wake ? 'wake' : 'hold'); return; }
+  W.on = false;
   if (!SR) { $('talk-err').textContent = 'Voice needs Google Chrome (or Edge).'; return; }
   if (rec) try { rec.abort(); } catch (e) {}
   rec = new SR(); rec.lang = $('lang').value; rec.interimResults = true; rec.continuous = !!wake;
@@ -390,15 +453,9 @@ function startRec(wake) {
       const t = ev.results[i][0].transcript;
       if (!ev.results[i].isFinal) { interim += t; continue; }
       if (!wake || holding) { finalText += t; continue; }
-      if (waitingCmd) { waitingCmd = false; ask(t); continue; }
-      const m = t.match(wakeRe());
-      if (m) {
-        if (m[1] && m[1].trim().length > 1) ask(m[1]);
-        else { waitingCmd = true; $('heard').textContent = 'Yes? I\'m listening…'; api('/api/move', { name: 'nod' }).catch(() => {}); setTimeout(() => { if (waitingCmd) { waitingCmd = false; $('heard').innerHTML = '&nbsp;'; } }, 8000); }
-      }
+      onHeard(t, true);
     }
     if (interim) $('heard').textContent = '“' + interim + '”';
-    else if (wake && !waitingCmd) { const last = ev.results[ev.results.length - 1]; if (last && last.isFinal) $('heard').textContent = 'Heard: “' + last[0].transcript.trim() + '” (say “' + ($('wake-word').value || 'hey gwm') + '” first)'; }
   };
   rec.onerror = e => { if (e.error === 'not-allowed') { $('talk-err').textContent = 'Allow the microphone for this page (click the icon in the address bar), then turn Always listening on.'; setWake(false); } };
   rec.onend = () => {
@@ -408,7 +465,7 @@ function startRec(wake) {
   try { rec.start(); } catch (e) {}
 }
 const pttDown = e => { e.preventDefault(); holding = true; speechSynthesis.cancel(); speaking = false; $('ptt').textContent = '🎤 Listening… (let go to send)'; startRec(false); };
-const pttUp = () => { if (!holding) return; holding = false; $('ptt').textContent = '🎤 Hold to talk'; if (rec) try { rec.stop(); } catch (e) {} if (wakeOn) setTimeout(() => startRec(true), 600); };
+const pttUp = () => { if (!holding) return; holding = false; $('ptt').textContent = '🎤 Hold to talk'; if (useWhisper()) wStop(true); else if (rec) try { rec.stop(); } catch (e) {} if (wakeOn) setTimeout(() => startRec(true), 600); };
 $('ptt').addEventListener('mousedown', pttDown); $('ptt').addEventListener('touchstart', pttDown, { passive: false });
 ['mouseup', 'mouseleave', 'touchend'].forEach(ev => $('ptt').addEventListener(ev, pttUp));
 document.addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && document.activeElement.tagName !== 'INPUT' && !$('tab-talk').hidden) pttDown(e); });
@@ -416,7 +473,7 @@ document.addEventListener('keyup', e => { if (e.code === 'Space' && !$('tab-talk
 function setWake(on, save) {
   wakeOn = on; $('wake').textContent = 'Always listening: ' + (on ? 'on' : 'off'); $('wake').classList.toggle('on', on);
   $('heard').textContent = on ? 'Listening for “' + ($('wake-word').value || 'hey gwm') + '”…' : '\u00a0';
-  if (on) startRec(true); else if (rec) try { rec.abort(); } catch (e) {}
+  if (on) startRec(true); else stopRec();
   if (save) { LLM.always_listen = on; api('/api/settings', { llm: LLM }).catch(() => {}); }
 }
 $('wake').onclick = () => setWake(!wakeOn, true);
@@ -428,6 +485,12 @@ $('voice').onchange = () => { try { localStorage.setItem('halo-voice', $('voice'
 async function llmLoad() {
   const s = await api('/api/settings'); LLM = s.llm || {};
   $('wake-word').value = LLM.wake_word || 'hey gwm'; $('lang').value = LLM.lang || 'en-US'; fillVoices();
+  $('stt').value = LLM.stt || 'chrome'; $('wmodel').value = LLM.whisper_model || 'base.en';
+  if (useWhisper()) {
+    const st = await api('/api/stt?load=1').catch(() => ({}));
+    if (!st.installed) { $('talk-err').textContent = (st.error || 'Whisper is not available.') + ' Using Chrome recognition for now.'; LLM.stt = 'chrome'; $('stt').value = 'chrome'; if (wakeOn) { stopRec(); startRec(true); } }
+    else if (st.error) $('talk-err').textContent = st.error;
+  }
   if (LLM.always_listen !== false && !wakeOn) setWake(true);
   const r = await api('/api/llm').catch(e => ({ ok: false, error: e.message, models: [] }));
   const models = [...new Set([...(r.models || []), LLM.model || 'qwen2.5:3b'])];
@@ -436,8 +499,11 @@ async function llmLoad() {
   $('llm-status').style.color = r.ok && (r.models || []).includes(LLM.model) ? 'var(--ok)' : 'var(--warn)';
 }
 $('llm-save').onclick = async () => {
-  LLM = { ...LLM, model: $('llm-model').value, wake_word: $('wake-word').value.trim() || 'hey gwm', lang: $('lang').value };
-  await api('/api/settings', { llm: LLM }); if (S) S.llm = LLM; llmLoad();
+  LLM = { ...LLM, model: $('llm-model').value, wake_word: $('wake-word').value.trim() || 'hey gwm', lang: $('lang').value, stt: $('stt').value, whisper_model: $('wmodel').value };
+  await api('/api/settings', { llm: LLM }); if (S) S.llm = LLM;
+  $('talk-err').textContent = '';
+  if (wakeOn) { stopRec(); startRec(true); }
+  llmLoad();
 };
 llmLoad().catch(() => {});
 

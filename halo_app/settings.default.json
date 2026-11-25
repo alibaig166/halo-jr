@@ -139,6 +139,8 @@
     "persona": "",
     "wake_word": "hey gwm",
     "lang": "en-US",
-    "always_listen": true
+    "always_listen": true,
+    "stt": "whisper",
+    "whisper_model": "base.en"
   }
 }

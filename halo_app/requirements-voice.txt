@@ -1,0 +1,2 @@
+# Offline speech recognition (Whisper). Optional: the app runs without it.
+faster-whisper

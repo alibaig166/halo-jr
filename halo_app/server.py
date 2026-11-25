@@ -9,6 +9,7 @@ from lamp import JOINTS, SMALL, Lamp, SerialLink, save_settings
 from vision import Vision
 from wiz import WizBulb
 from brain import Brain
+from ears import Ears
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(HERE, "static"), static_url_path="/static")
@@ -19,6 +20,7 @@ link = SerialLink()
 lamp = Lamp(link)
 vision = Vision(lamp)
 brain = Brain(lamp)
+ears = Ears(lamp)
 
 
 def ok(**extra):
@@ -150,6 +152,23 @@ def llm_info():
     return jsonify({"ok": True, "models": m, "model": lamp.s.get("llm", {}).get("model")})
 
 
+@app.get("/api/stt")
+def stt_status():
+    if request.args.get("load"):
+        ears.preload()
+    return jsonify(ears.status())
+
+
+@app.post("/api/stt")
+def stt():
+    """Raw 16-bit 16 kHz mono audio in, text out (Whisper, offline)."""
+    try:
+        text = ears.hear(request.get_data(), int(request.args.get("rate", 16000)))
+    except RuntimeError as e:
+        return bad(str(e))
+    return ok(text=text)
+
+
 @app.post("/api/chat")
 def chat():
     body = request.get_json(force=True)
@@ -231,6 +250,8 @@ def video():
 
 
 if __name__ == "__main__":
+    if lamp.s.get("llm", {}).get("stt") == "whisper":
+        ears.preload()                       # load Whisper now so the first sentence isn't slow
     port = lamp.s.get("serial_port")
     if port and any(p["device"] == port for p in SerialLink.ports()):
         try:
