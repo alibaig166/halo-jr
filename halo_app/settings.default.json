@@ -137,7 +137,8 @@
     "url": "http://localhost:11434",
     "model": "qwen2.5:3b",
     "persona": "",
-    "wake_word": "hey halo",
-    "lang": "en-US"
+    "wake_word": "hey gwm",
+    "lang": "en-US",
+    "always_listen": true
   }
 }

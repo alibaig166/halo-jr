@@ -179,7 +179,7 @@ table.lv input { width: 64px; }
           <p class="note" id="llm-status">Checking Ollama…</p>
           <div class="row" style="align-items:center">
             <button class="primary" id="ptt" style="flex:1;padding:16px;font-size:16px">🎤 Hold to talk</button>
-            <button id="wake">"Hey Halo": off</button>
+            <button id="wake">Always listening: off</button>
           </div>
           <p class="note" id="heard">&nbsp;</p>
           <div id="chat" style="display:grid;gap:6px;max-height:300px;overflow:auto"></div>
@@ -194,7 +194,7 @@ table.lv input { width: 64px; }
           <div class="grid2">
             <label class="field">Model (Ollama)<select id="llm-model" style="width:100%"></select></label>
             <label class="field">Halo's voice<select id="voice" style="width:100%"></select></label>
-            <label class="field">Wake word<input id="wake-word"></label>
+            <label class="field">Wake word (add spellings with commas)<input id="wake-word"></label>
             <label class="field">Language<select id="lang" style="width:100%"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-IN">English (India/Pakistan)</option><option value="ur-PK">Urdu</option></select></label>
           </div>
           <div class="row"><button id="llm-save">Save</button><button id="forget">Forget the conversation</button></div>
@@ -372,7 +372,13 @@ async function ask(text) {
   } catch (e) { $('talk-err').textContent = e.message; }
   $('heard').innerHTML = '&nbsp;';
 }
-function wakeRe() { const w = ($('wake-word').value || 'hey halo').toLowerCase().replace(/^hey\s+/, ''); return new RegExp('\\b(?:hey|hi|ok|okay|a)?\\s*(?:' + w + '|hello|hallo|helo|haloo)\\b[,.!?]?\\s*(.*)$', 'i'); }
+function wakeRe() {
+  // several wake words allowed, separated by commas. Short letter names like "gwm" also match "g w m", "G.W.M." and "GW M".
+  const words = ($('wake-word').value || 'hey gwm').toLowerCase().split(',').map(w => w.trim().replace(/^(hey|hi|ok|okay)\s+/, '')).filter(Boolean);
+  const alts = words.map(w => /^[a-z]{2,5}$/.test(w) && !/[aeiou]/.test(w) ? w.split('').join('[\\s.]*') : w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (words.includes('halo')) alts.push('hello', 'hallo', 'helo');
+  return new RegExp('(?:^|\\b)(?:hey|hi|ok|okay|a)?[\\s,]*(?:' + alts.join('|') + ')\\.?\\b[,.!?]?\\s*(.*)$', 'i');
+}
 function startRec(wake) {
   if (!SR) { $('talk-err').textContent = 'Voice needs Google Chrome (or Edge).'; return; }
   if (rec) try { rec.abort(); } catch (e) {}
@@ -392,8 +398,9 @@ function startRec(wake) {
       }
     }
     if (interim) $('heard').textContent = '“' + interim + '”';
+    else if (wake && !waitingCmd) { const last = ev.results[ev.results.length - 1]; if (last && last.isFinal) $('heard').textContent = 'Heard: “' + last[0].transcript.trim() + '” (say “' + ($('wake-word').value || 'hey gwm') + '” first)'; }
   };
-  rec.onerror = e => { if (e.error === 'not-allowed') { $('talk-err').textContent = 'Allow the microphone for this page (click the icon in the address bar).'; wakeOn = false; $('wake').textContent = '"Hey Halo": off'; } };
+  rec.onerror = e => { if (e.error === 'not-allowed') { $('talk-err').textContent = 'Allow the microphone for this page (click the icon in the address bar), then turn Always listening on.'; setWake(false); } };
   rec.onend = () => {
     if (!wake && finalText) ask(finalText);
     else if (wake && wakeOn && !speaking && !holding) setTimeout(() => wakeOn && !speaking && startRec(true), 250);
@@ -406,7 +413,13 @@ $('ptt').addEventListener('mousedown', pttDown); $('ptt').addEventListener('touc
 ['mouseup', 'mouseleave', 'touchend'].forEach(ev => $('ptt').addEventListener(ev, pttUp));
 document.addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && document.activeElement.tagName !== 'INPUT' && !$('tab-talk').hidden) pttDown(e); });
 document.addEventListener('keyup', e => { if (e.code === 'Space' && !$('tab-talk').hidden) pttUp(); });
-$('wake').onclick = () => { wakeOn = !wakeOn; $('wake').textContent = '"Hey Halo": ' + (wakeOn ? 'on' : 'off'); $('wake').classList.toggle('on', wakeOn); if (wakeOn) startRec(true); else if (rec) try { rec.abort(); } catch (e) {} };
+function setWake(on, save) {
+  wakeOn = on; $('wake').textContent = 'Always listening: ' + (on ? 'on' : 'off'); $('wake').classList.toggle('on', on);
+  $('heard').textContent = on ? 'Listening for “' + ($('wake-word').value || 'hey gwm') + '”…' : '\u00a0';
+  if (on) startRec(true); else if (rec) try { rec.abort(); } catch (e) {}
+  if (save) { LLM.always_listen = on; api('/api/settings', { llm: LLM }).catch(() => {}); }
+}
+$('wake').onclick = () => setWake(!wakeOn, true);
 $('say-send').onclick = () => { ask($('say').value); $('say').value = ''; };
 $('say').addEventListener('keydown', e => { if (e.key === 'Enter') $('say-send').onclick(); });
 $('forget').onclick = () => { api('/api/chat', { forget: true }); $('chat').innerHTML = ''; };
@@ -414,7 +427,8 @@ $('lang').onchange = fillVoices;
 $('voice').onchange = () => { try { localStorage.setItem('halo-voice', $('voice').value); } catch (e) {} };
 async function llmLoad() {
   const s = await api('/api/settings'); LLM = s.llm || {};
-  $('wake-word').value = LLM.wake_word || 'hey halo'; $('lang').value = LLM.lang || 'en-US'; fillVoices();
+  $('wake-word').value = LLM.wake_word || 'hey gwm'; $('lang').value = LLM.lang || 'en-US'; fillVoices();
+  if (LLM.always_listen !== false && !wakeOn) setWake(true);
   const r = await api('/api/llm').catch(e => ({ ok: false, error: e.message, models: [] }));
   const models = [...new Set([...(r.models || []), LLM.model || 'qwen2.5:3b'])];
   $('llm-model').innerHTML = models.map(m => `<option${m === LLM.model ? ' selected' : ''}>${esc(m)}</option>`).join('');
@@ -422,7 +436,7 @@ async function llmLoad() {
   $('llm-status').style.color = r.ok && (r.models || []).includes(LLM.model) ? 'var(--ok)' : 'var(--warn)';
 }
 $('llm-save').onclick = async () => {
-  LLM = { ...LLM, model: $('llm-model').value, wake_word: $('wake-word').value.trim() || 'hey halo', lang: $('lang').value };
+  LLM = { ...LLM, model: $('llm-model').value, wake_word: $('wake-word').value.trim() || 'hey gwm', lang: $('lang').value };
   await api('/api/settings', { llm: LLM }); if (S) S.llm = LLM; llmLoad();
 };
 llmLoad().catch(() => {});
