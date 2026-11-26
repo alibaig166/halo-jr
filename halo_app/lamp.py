@@ -4,6 +4,7 @@ import json
 from wiz import WizBulb
 import math
 import os
+import re
 import socket
 import threading
 import time
@@ -374,6 +375,52 @@ class Lamp:
         self.stop_move()
         self.go({"lean": lean, "fore": fore})
 
+    def wiz_via_esp(self):
+        """Send bulb commands down the USB cable to the ESP32, which passes them to the bulb on its own Wi-Fi."""
+        w = self.s.get("wiz", {})
+        route = w.get("route", "auto")
+        if route == "esp":
+            return True
+        if route == "direct":
+            return False
+        return self.link.connected and w.get("ip", "").startswith("192.168.4.")
+
+    def _wiz_relay(self):
+        ip = self.s.get("wiz", {}).get("ip", "")
+        return lambda msg: self.link.send("W %s %s" % (ip, json.dumps(msg, separators=(",", ":"))))
+
+    def find_wiz_via_esp(self, wait=2.6):
+        """Ask the ESP32 which WiZ bulbs are on its Wi-Fi. Returns [{'ip':...}]."""
+        if not self.link.connected:
+            raise RuntimeError("Connect the ESP32 first (USB or Wi-Fi).")
+        self.link.send("F")
+        t0 = time.time()
+        while time.time() - t0 < wait:
+            time.sleep(0.2)
+            tail = self.link.log[-25:]
+            idx = max((i for i, l in enumerate(tail) if l.endswith("> F")), default=None)
+            if idx is not None and any("OK found" in l for l in tail[idx:]):
+                break
+        tail = self.link.log[-25:]
+        idx = max((i for i, l in enumerate(tail) if l.endswith("> F")), default=0)
+        ips = []
+        for l in tail[idx:]:
+            m = re.search(r"< WIZ (\d+\.\d+\.\d+\.\d+)", l)
+            if m and m.group(1) not in ips:
+                ips.append(m.group(1))
+        if not any("OK found" in l or "WIZ" in l for l in tail[idx:]):
+            raise RuntimeError("The ESP32 didn't answer. Upload the latest firmware (v4) to it.")
+        return [{"ip": ip, "mac": ""} for ip in ips]
+
+    def esp_wifi(self, name, password):
+        """Rename the ESP32's own Wi-Fi (saved on the ESP32)."""
+        if not self.link.connected:
+            raise RuntimeError("Connect the ESP32 first.")
+        name = name.strip()
+        if not name or len(name) > 32 or "|" in name or (password and len(password) < 8):
+            raise RuntimeError("Name 1-32 characters; password 8 or more characters (or empty for an open network).")
+        self.link.send("N %s|%s" % (name, password))
+
     def light(self, on=None, brightness=None):
         if on is not None:
             self.light_on = bool(on)
@@ -383,6 +430,7 @@ class Lamp:
         # the Philips WiZ bulb follows the same on/off and brightness
         w = self.s.get("wiz", {})
         self.wiz.ip = w.get("ip", "")
+        self.wiz.relay = self._wiz_relay() if self.wiz_via_esp() else None
         self.wiz.apply(self.light_on, self.brightness, w.get("mode", "temp"), w.get("temp", 2700), w.get("color", "#ffb060"))
 
     def release(self):

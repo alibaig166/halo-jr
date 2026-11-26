@@ -132,6 +132,14 @@ table.lv input { width: 64px; }
           </div>
           <h2 style="margin-top:12px">Philips WiZ bulb</h2>
           <div class="row" style="align-items:center">
+            <label class="field" style="flex:1;min-width:200px">Reach the bulb
+              <select id="wiz-route" style="width:100%">
+                <option value="auto">Automatic</option>
+                <option value="esp">Through the ESP32's Wi-Fi (laptop can stay on any Wi-Fi)</option>
+                <option value="direct">Directly over this laptop's Wi-Fi</option>
+              </select></label>
+          </div>
+          <div class="row" style="align-items:center">
             <input id="wiz-ip" placeholder="Bulb IP, e.g. 192.168.1.45" style="flex:1;min-width:160px">
             <button id="wiz-find">Find bulb</button><button id="wiz-test">Test</button>
           </div>
@@ -144,6 +152,15 @@ table.lv input { width: 64px; }
             <input type="color" id="wiz-color">
           </div>
           <p class="err" id="wiz-msg"></p>
+          <details class="note"><summary>Bulb on the ESP32's Wi-Fi (works at uni, no router)</summary>
+            <p style="margin:6px 0">The ESP32 makes its own Wi-Fi. If you give it <b>the same name and password as your home Wi-Fi</b>, a bulb you set up at home joins it by itself anywhere. The laptop stays on any Wi-Fi (for internet), the ESP32 is on the USB cable, and the app reaches the bulb through the ESP32.</p>
+            <div class="row" style="align-items:center">
+              <input id="esp-ssid" placeholder="ESP32 Wi-Fi name (e.g. your home Wi-Fi)" style="flex:1;min-width:160px">
+              <input id="esp-pass" placeholder="password (8+ chars)" style="flex:1;min-width:120px">
+              <button id="esp-wifi-set">Set ESP32 Wi-Fi</button>
+            </div>
+            <p style="margin:6px 0">Default: <b>HaloJr</b> / <b>halojr123</b>. At home, set it back to HaloJr so it doesn't clash with your router.</p>
+          </details>
           <p class="note">The bulb follows Light on/off and Brightness (also the open-palm gesture, Wake and Sleep). Same Wi-Fi as this computer, and in the WiZ app turn on Settings → Security → Allow local communication.</p>
         </section>
         <section class="row">
@@ -574,23 +591,29 @@ function duck(on) { clearTimeout(duckTimer); if (on) api('/api/music', { duck: t
 
 // ---------- WiZ bulb ----------
 const wizMsg = (m, bad) => { $('wiz-msg').textContent = m; $('wiz-msg').style.color = bad ? '' : 'var(--ok, #3ccf7a)'; };
-async function wizSet(body) { try { await api('/api/wiz', body); if (S) { const { test, find, ...f } = body; S.wiz = { ...(S.wiz || {}), ...f }; } return true; } catch (e) { wizMsg(e.message, true); return false; } }
+async function wizSet(body) { try { await api('/api/wiz', body); if (S) { const { test, find, esp_wifi, ...f } = body; S.wiz = { ...(S.wiz || {}), ...f }; } return true; } catch (e) { wizMsg(e.message, true); return false; } }
 function wizLoad(S) {
   const w = S.wiz || {};
   $('wiz-ip').value = w.ip || ''; $('wiz-temp').value = w.temp || 2700; $('o-wiz-temp').textContent = (w.temp || 2700) + 'K';
   $('wiz-color').value = w.color || '#ffb060';
+  $('wiz-route').value = w.route || 'auto';
   document.querySelectorAll('input[name=wiz-mode]').forEach(r => r.checked = r.value === (w.mode || 'temp'));
 }
 fetch('/api/settings').then(r => r.json()).then(wizLoad).catch(() => {});
+$('wiz-route').onchange = () => wizSet({ route: $('wiz-route').value });
+$('esp-wifi-set').onclick = async () => {
+  const name = $('esp-ssid').value.trim(), password = $('esp-pass').value;
+  if (await wizSet({ esp_wifi: { name, password } })) wizMsg('ESP32 Wi-Fi is now "' + name + '". The bulb joins in about a minute (turn it off and on to speed it up).');
+};
 $('wiz-ip').addEventListener('change', () => wizSet({ ip: $('wiz-ip').value.trim() }));
 $('wiz-test').onclick = async () => { if (await wizSet({ ip: $('wiz-ip').value.trim(), test: true })) wizMsg('Bulb answered ✓'); };
 $('wiz-find').onclick = async () => {
   wizMsg('Looking for bulbs…');
   try {
     const r = await api('/api/wiz', { find: true });
-    if (!r.bulbs.length) return wizMsg('No bulb answered. Same Wi-Fi? "Allow local communication" on in the WiZ app?', true);
+    if (!r.bulbs.length) return wizMsg(r.via === 'esp' ? 'No bulb on the ESP32 Wi-Fi yet. Is the bulb set to that Wi-Fi name and password, and switched on?' : 'No bulb answered. Same Wi-Fi? "Allow local communication" on in the WiZ app?', true);
     $('wiz-ip').value = r.bulbs[0].ip; await wizSet({ ip: r.bulbs[0].ip });
-    wizMsg('Found: ' + r.bulbs.map(b => b.ip).join(', ') + (r.bulbs.length > 1 ? ' (using the first one)' : ''));
+    wizMsg('Found ' + (r.via === 'esp' ? 'on the ESP32 Wi-Fi' : 'on this Wi-Fi') + ': ' + r.bulbs.map(b => b.ip).join(', ') + (r.bulbs.length > 1 ? ' (using the first one)' : ''));
   } catch (e) { wizMsg(e.message, true); }
 };
 $('wiz-temp').oninput = () => $('o-wiz-temp').textContent = $('wiz-temp').value + 'K';

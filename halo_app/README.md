@@ -34,6 +34,11 @@ The ESP32 makes its own Wi-Fi: **HaloJr**, password **halojr123**. Connect the l
 Power the ESP32 from 5 V on VIN (or a USB charger) when the cable isn't plugged into the laptop.
 To also join a home router, put its name and password in `HOME_SSID` / `HOME_PASS` in the firmware.
 
+## WiZ bulb through the ESP32 (laptop keeps its internet)
+Firmware v4 passes bulb commands from the USB cable to bulbs on the ESP32's own Wi-Fi.
+Control tab -> Philips WiZ bulb -> "Bulb on the ESP32's Wi-Fi": give the ESP32 your home Wi-Fi's
+name and password, so a bulb set up at home joins it anywhere. Then Find bulb -> Test.
+
 ## Wiring (same as before)
 | PCA9685 | Connect to |
 |---|---|

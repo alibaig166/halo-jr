@@ -18,9 +18,14 @@
 //   X                              release all servos (they go limp)
 //   R                              report current angles
 //   ?                              hello
+//   W ip {json}                    send a WiZ bulb command (UDP 38899) to a bulb on the ESP32's Wi-Fi
+//   F                              find WiZ bulbs on the ESP32's Wi-Fi (answers "WIZ <ip>" lines)
+//   N name|password                rename the ESP32's Wi-Fi (saved; password 8+ chars, or empty = open)
 
 #include <Wire.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
+#include <Preferences.h>
 #include <Adafruit_PWMServoDriver.h>
 
 // ---- ESP32 -> PCA9685 wiring ----
@@ -29,8 +34,14 @@ const int SDA_PIN = 32;            // -> PCA9685 SDA
 const int SCL_PIN = 33;            // -> PCA9685 SCL
 
 // ---- Wi-Fi ----
-const char* AP_SSID   = "HaloJr";       // the ESP32's own network
-const char* AP_PASS   = "halojr123";    // at least 8 characters
+// The ESP32's own network. Default HaloJr / halojr123; change it from the app (Settings) without
+// re-uploading. Tip: give it your HOME Wi-Fi's name and password and a WiZ bulb set up at home
+// will join it by itself anywhere (it thinks it's home).
+String apSsid = "HaloJr";
+String apPass = "halojr123";
+Preferences prefs;
+WiFiUDP udp;
+const int WIZ_PORT = 38899;
 const char* HOME_SSID = "";             // optional: your router's name, or leave ""
 const char* HOME_PASS = "";
 const int   TCP_PORT  = 3333;
@@ -70,10 +81,10 @@ void report(Print& out) {
 }
 
 void hello(Print& out) {
-  out.print("HALO OK v3 (PCA9685 ");
+  out.print("HALO OK v4 (PCA9685 ");
   out.print(pcaFound ? "found" : "NOT FOUND - check SDA GPIO32, SCL GPIO33, VCC 3V3, GND");
   out.print(") wifi ");
-  out.print(AP_SSID);
+  out.print(apSsid);
   out.print(" ");
   out.print(WiFi.softAPIP());
   if (WiFi.status() == WL_CONNECTED) { out.print(" home "); out.print(WiFi.localIP()); }
@@ -132,6 +143,58 @@ void handle(String s, Print& out) {
     report(out);
   } else if (c == '?') {
     hello(out);
+  } else if (c == 'W') {                          // W 192.168.4.2 {"method":"setPilot",...}
+    String rest = s.substring(1);
+    rest.trim();
+    int sp = rest.indexOf(' ');
+    IPAddress ip;
+    if (sp < 0 || !ip.fromString(rest.substring(0, sp))) { out.println("ERR W"); return; }
+    String msg = rest.substring(sp + 1);
+    for (int k = 0; k < 2; k++) {                // UDP can drop a packet, so send twice
+      udp.beginPacket(ip, WIZ_PORT);
+      udp.print(msg);
+      udp.endPacket();
+    }
+    out.println("OK");
+  } else if (c == 'F') {                          // find bulbs on our own Wi-Fi
+    IPAddress bc = WiFi.softAPIP();
+    bc[3] = 255;
+    while (udp.parsePacket() > 0) { while (udp.available()) udp.read(); }   // drop old replies
+    IPAddress seen[10];
+    int nSeen = 0;
+    unsigned long start = millis();
+    unsigned long lastSend = 0;
+    while (millis() - start < 1800) {
+      if (millis() - lastSend > 500) {
+        udp.beginPacket(bc, WIZ_PORT);
+        udp.print("{\"method\":\"getPilot\",\"params\":{}}");
+        udp.endPacket();
+        lastSend = millis();
+      }
+      if (udp.parsePacket() > 0) {
+        IPAddress from = udp.remoteIP();
+        while (udp.available()) udp.read();
+        bool dup = false;
+        for (int k = 0; k < nSeen; k++) if (seen[k] == from) dup = true;
+        if (!dup && nSeen < 10) { seen[nSeen++] = from; out.print("WIZ "); out.println(from); }
+      }
+      delay(5);
+    }
+    out.print("OK found ");
+    out.println(nSeen);
+  } else if (c == 'N') {                          // N name|password
+    String rest = s.substring(1);
+    rest.trim();
+    int bar = rest.indexOf('|');
+    String ns = bar < 0 ? rest : rest.substring(0, bar);
+    String np = bar < 0 ? "" : rest.substring(bar + 1);
+    if (ns.length() == 0 || ns.length() > 32 || (np.length() > 0 && np.length() < 8)) { out.println("ERR N (name 1-32 chars, password 8+ chars or empty)"); return; }
+    apSsid = ns;
+    apPass = np;
+    prefs.putString("ssid", apSsid);
+    prefs.putString("pass", apPass);
+    out.println("OK Wi-Fi is now " + apSsid);
+    WiFi.softAP(apSsid.c_str(), apPass.length() ? apPass.c_str() : NULL);
   } else {
     out.println("ERR ?");
   }
@@ -151,8 +214,11 @@ void setup() {
   for (int i = 0; i < NCH; i++) { active[i] = false; moving[i] = false; }
 
   // Wi-Fi: own network always, home network too if set
+  prefs.begin("halo", false);
+  apSsid = prefs.getString("ssid", apSsid);
+  apPass = prefs.getString("pass", apPass);
   WiFi.mode(strlen(HOME_SSID) ? WIFI_AP_STA : WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
+  WiFi.softAP(apSsid.c_str(), apPass.length() ? apPass.c_str() : NULL);
   if (strlen(HOME_SSID)) {
     WiFi.begin(HOME_SSID, HOME_PASS);
     unsigned long t = millis();
@@ -161,6 +227,7 @@ void setup() {
   WiFi.setSleep(false);              // no power-save: servo commands arrive without lag
   server.begin();
   server.setNoDelay(true);
+  udp.begin(38900);                  // WiZ bulbs answer to this port
   hello(Serial);
 }
 

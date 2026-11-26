@@ -13,6 +13,7 @@ PORT = 38899
 class WizBulb:
     def __init__(self):
         self.ip = ""
+        self.relay = None          # set by the lamp: send through the ESP32 instead of this computer's Wi-Fi
         self.error = ""
         self._lock = threading.Lock()
 
@@ -44,6 +45,9 @@ class WizBulb:
         return None
 
     def _bg(self, msg):
+        if self.relay:
+            self.relay(msg)
+            return
         threading.Thread(target=self._send, args=(msg,), daemon=True).start()
 
     # ---------- what the app uses ----------

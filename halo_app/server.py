@@ -246,9 +246,28 @@ def chat():
 def wiz():
     """find = list bulbs on the Wi-Fi; ip/mode/temp/color = change and save; test = ask the bulb."""
     body = request.get_json(force=True)
-    if body.get("find"):
-        return ok(bulbs=WizBulb.find())
     w = lamp.s.setdefault("wiz", {})
+    if "route" in body:
+        w["route"] = body["route"]
+        save_settings(lamp.s)
+    if "esp_wifi" in body:
+        try:
+            lamp.esp_wifi(body["esp_wifi"].get("name", ""), body["esp_wifi"].get("password", ""))
+        except RuntimeError as e:
+            return bad(str(e))
+        return ok()
+    if body.get("find"):
+        route = w.get("route", "auto")
+        if route == "esp" or (route == "auto" and link.connected):
+            try:
+                found = lamp.find_wiz_via_esp()
+            except RuntimeError as e:
+                if route == "esp":
+                    return bad(str(e))
+                found = []
+            if found or route == "esp":
+                return ok(bulbs=found, via="esp")
+        return ok(bulbs=WizBulb.find(), via="laptop")
     for k in ("ip", "mode", "temp", "color"):
         if k in body:
             w[k] = body[k]
@@ -256,6 +275,14 @@ def wiz():
     lamp.light()
     if body.get("test"):
         lamp.wiz.ip = w.get("ip", "")
+        if lamp.wiz_via_esp():
+            try:
+                found = [b["ip"] for b in lamp.find_wiz_via_esp()]
+            except RuntimeError as e:
+                return bad(str(e))
+            if w.get("ip") not in found:
+                return bad("The ESP32 can't see a bulb at %s. Bulbs on its Wi-Fi: %s" % (w.get("ip") or "(no IP)", ", ".join(found) or "none"))
+            return ok()
         if not lamp.wiz.test():
             return bad("WiZ bulb did not answer at %s: %s" % (w.get("ip") or "(no IP)", lamp.wiz.error))
     return ok()

@@ -131,7 +131,8 @@
     "ip": "",
     "mode": "temp",
     "temp": 2700,
-    "color": "#ffb060"
+    "color": "#ffb060",
+    "route": "auto"
   },
   "llm": {
     "url": "http://localhost:11434",
