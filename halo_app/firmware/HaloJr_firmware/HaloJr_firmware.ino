@@ -11,7 +11,7 @@
 // Board:   ESP32 Dev Module, Serial 115200
 //
 // Commands (one per line, sent by the web app):
-//   T ms a0 a1 a2 a3 a4 a5 a6 a7   move channels 0..7 to angle (0..180) over ms milliseconds, all together.
+//   T ms a0 a1 ... a15             move channels 0..15 to angle (0..180) over ms milliseconds, all together.
 //                                  Use -1 for a channel you don't want to move.
 //   L duty                         lamp light brightness 0..255 (LED / MOSFET on LIGHT_PIN)
 //   C min max                      servo pulse range in microseconds (e.g. C 500 2400)
