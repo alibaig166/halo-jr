@@ -303,42 +303,57 @@ class Lamp:
         """deg/s for one servo (camera = both camera servos)."""
         return max(1, self.s.get("speeds", {}).get(name, self.s["speed"]))
 
-    def _send_targets(self, sv, ms_by_joint):
+    def _send_targets(self, sv, ms_by_joint, joints=None):
+        """Send only the servos in `joints` (others keep doing what they were doing)."""
         ch = self.s["channels"]
+        joints = list(JOINTS) if joints is None else list(joints)
         if not self.sent_once:
             p = self.s["pulse"]
             self.link.send("C %d %d" % (p["min"], p["max"]))
             if not self.link.connected:
                 ms_by_joint = {j: 0 for j in JOINTS}
+            joints = list(JOINTS)                     # very first command: tell the ESP32 about every servo
             self.sent_once = self.link.connected
         groups = {}                                   # servos with the same move time go in one command
-        for j in JOINTS:
+        for j in joints:
             groups.setdefault(int(ms_by_joint[j]), []).append(j)
-        for ms, joints in groups.items():
+        for ms, js in groups.items():
             vals = [-1] * NCH
-            for j in joints:
+            for j in js:
                 vals[ch[j]] = sv[j]
             self.link.send("T %d %s" % (ms, " ".join("%.1f" % v if v >= 0 else "-1" for v in vals)))
 
     def go_servos(self, sv, ms=None):
+        now = time.time()
         now_sv = self.current_servos()
         if ms is None:
-            # each servo uses its own speed from Settings
+            # only servos whose target changed get a command; each uses its own speed from Settings
+            changed = [j for j in JOINTS if abs(sv[j] - self.to_sv[j]) >= 0.05]
+            if not self.sent_once:
+                changed = list(JOINTS)
             ms_j = {}
             for j in JOINTS:
-                d = abs(sv[j] - now_sv[j])
-                ms_j[j] = 0 if d < 0.05 else max(self.s["min_move_ms"], d / self.speed_of(j) * 1000)
+                if j in changed:
+                    d = abs(sv[j] - now_sv[j])
+                    ms_j[j] = 0 if d < 0.05 else max(self.s["min_move_ms"], d / self.speed_of(j) * 1000)
+                else:                                   # untouched: let it finish its current move
+                    ms_j[j] = max(0.0, self.dur[j] - (now - self.t0)) * 1000
             # upper arm and push rod must finish together, or the elbow can jam in the middle of a move
-            pair = max(ms_j["upper"], ms_j["pushrod"])
-            if pair:
+            if "upper" in changed or "pushrod" in changed:
+                pair = max(ms_j["upper"], ms_j["pushrod"])
                 ms_j["upper"] = ms_j["pushrod"] = pair
+                for j in ("upper", "pushrod"):
+                    if j not in changed:
+                        changed.append(j)
         else:
+            changed = list(JOINTS)
             ms_j = {j: ms for j in JOINTS}
         with self.lock:
             self.from_sv, self.to_sv = now_sv, dict(sv)
-            self.t0, self.dur = time.time(), {j: ms_j[j] / 1000.0 for j in JOINTS}
-        self._send_targets(sv, ms_j)
-        return max(ms_j.values())
+            self.t0, self.dur = now, {j: ms_j[j] / 1000.0 for j in JOINTS}
+        if changed:
+            self._send_targets(sv, ms_j, changed)
+        return max([ms_j[j] for j in changed] or [0])
 
     def go(self, pose, ms=None):
         p = self.legal({**self.target, **pose})
