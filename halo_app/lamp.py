@@ -147,6 +147,7 @@ class SerialLink:
             time.sleep(0.1)
             after = self.log[max(i for i, l in enumerate(self.log) if l.endswith("> ?")):]
             if any("HALO" in l for l in after):
+                self.firmware = next((l for l in after if "HALO" in l), "")
                 return
         self._note("! The ESP32 is not answering. Upload firmware/HaloJr_firmware once, "
                    "close the Arduino IDE, then press EN on the ESP32 and Connect again.")

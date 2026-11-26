@@ -287,6 +287,11 @@ table.lv input { width: 64px; }
           <h2>Channels and directions</h2>
           <div class="grid2" id="set-ch"></div>
           <div class="grid2" id="set-ch-small"></div>
+          <div class="row"><span class="note">Pinout:</span>
+            <button id="pin-classic" title="base 0, upper 1, push rod 2, head 3, iris 4, camera 5 / 6">Use 0-6 (next to each other)</button>
+            <button id="pin-spaced" title="base 0, upper 2, push rod 4, head 6, iris 8, camera 10 / 12">Use 0, 2, 4 … 12 (gaps)</button>
+          </div>
+          <p class="note">Pick the one that matches where the plugs are, then press Save. 0-6 works with any firmware; the gapped one needs the new firmware.</p>
         </section>
         <section style="display:grid;gap:8px">
           <h2>Zero offsets</h2>
@@ -657,6 +662,12 @@ $('gestures').onclick = () => api('/api/camera', { gestures: !(ST && ST.vision.g
 
 // ---------- settings ----------
 const SMALLNAMES = { iris: 'Iris', cam_pan: 'Camera left/right', cam_tilt: 'Camera up/down' };
+function pinPreset(step) {
+  const order = ['base', 'upper', 'pushrod', 'head', 'iris', 'cam_pan', 'cam_tilt'];
+  order.forEach((k, i) => { const el = $('ch-' + k); if (el) el.value = i * step; });
+  $('saved').textContent = 'Channels filled in. Press Save.';
+}
+document.addEventListener('click', e => { if (e.target.id === 'pin-classic') pinPreset(1); if (e.target.id === 'pin-spaced') pinPreset(2); });
 function drawPinout() {
   // a picture of the PCA9685: 16 channels, the used ones lit up, plus a plain list
   const who = {};

@@ -78,6 +78,12 @@ def connect():
     lamp.s["serial_port"] = port
     save_settings(lamp.s)
     lamp.resync()
+    # old firmware (v1/v2 had only channels 0-7, v1 used D21/D22) can't drive the spaced-out pinout
+    fw = getattr(link, "firmware", "")
+    used = list(lamp.s["channels"].values()) + list(lamp.s["small"]["channels"].values())
+    if fw and ("v1" in fw) and max(used) > 7:
+        link._note("! This ESP32 has old firmware (%s). It only drives channels 0-7, but your pinout uses up to %d. "
+                   "Upload the new firmware, or Settings -> Pinout -> 'Use 0-6' and move the plugs back." % (fw.split("<")[-1].strip(), max(used)))
     return ok()
 
 
