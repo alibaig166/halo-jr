@@ -8,10 +8,14 @@ import threading
 
 import numpy as np
 
+import sys
+
 try:
     from faster_whisper import WhisperModel
-except ImportError:          # voice package not installed: the app still runs, Chrome recognition still works
+    IMPORT_ERROR = ""
+except Exception as _e:      # not installed, or installed for a different Python: the app still runs
     WhisperModel = None
+    IMPORT_ERROR = "%s: %s" % (type(_e).__name__, _e)
 
 
 class Ears:
@@ -35,8 +39,10 @@ class Ears:
 
     def status(self):
         if WhisperModel is None:
+            py = "python" if sys.platform.startswith("win") else "python3"
             return {"installed": False, "ready": False,
-                    "error": "Whisper is not installed. In the terminal: pip install -r requirements-voice.txt"}
+                    "error": "Whisper can't load in the Python running this app (%s). Install it for this exact Python: "
+                             "%s -m pip install -r requirements-voice.txt   [%s]" % (sys.executable, py, IMPORT_ERROR)}
         return {"installed": True, "ready": self.model is not None and self.model_name == self._name(),
                 "loading": self.loading, "model": self._name(), "error": self.error}
 

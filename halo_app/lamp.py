@@ -35,6 +35,9 @@ def load_settings():
     if os.path.exists(SETTINGS_FILE):
         with open(SETTINGS_FILE) as f:
             mine = json.load(f)
+        sp = mine.get("speeds")
+        if isinstance(sp, dict) and sp.get("iris") == 60:   # old default iris speed -> new fast default
+            sp["iris"] = s["speeds"]["iris"]
         if mine.get("pinout") != s.get("pinout"):          # wiring changed in an update: take the new channel numbers
             mine.pop("channels", None)
             if isinstance(mine.get("small"), dict):
