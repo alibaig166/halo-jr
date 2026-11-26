@@ -23,6 +23,11 @@
 #include <WiFi.h>
 #include <Adafruit_PWMServoDriver.h>
 
+// ---- ESP32 -> PCA9685 wiring ----
+// GPIO 34/35 are input-only on the ESP32 (they can't drive I2C), so I2C uses 32/33.
+const int SDA_PIN = 32;            // -> PCA9685 SDA
+const int SCL_PIN = 33;            // -> PCA9685 SCL
+
 // ---- Wi-Fi ----
 const char* AP_SSID   = "HaloJr";       // the ESP32's own network
 const char* AP_PASS   = "halojr123";    // at least 8 characters
@@ -66,7 +71,7 @@ void report(Print& out) {
 
 void hello(Print& out) {
   out.print("HALO OK v3 (PCA9685 ");
-  out.print(pcaFound ? "found" : "NOT FOUND - check SDA D21, SCL D22, VCC 3V3, GND");
+  out.print(pcaFound ? "found" : "NOT FOUND - check SDA GPIO32, SCL GPIO33, VCC 3V3, GND");
   out.print(") wifi ");
   out.print(AP_SSID);
   out.print(" ");
@@ -135,7 +140,7 @@ void handle(String s, Print& out) {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Wire.begin(21, 22);
+  Wire.begin(SDA_PIN, SCL_PIN);
   Wire.beginTransmission(0x40);
   pcaFound = Wire.endTransmission() == 0;
   pwm.begin();

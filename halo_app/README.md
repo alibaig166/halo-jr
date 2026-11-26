@@ -38,7 +38,7 @@ To also join a home router, put its name and password in `HOME_SSID` / `HOME_PAS
 | PCA9685 | Connect to |
 |---|---|
 | VCC / GND | ESP32 3V3 / GND |
-| SDA / SCL | ESP32 D21 / D22 |
+| SDA / SCL | ESP32 GPIO 32 / GPIO 33 |
 | V+ | 6.5 V buck + (thick wire), buck − to GND |
 | ch0 | base turn |
 | ch2 | upper arm |
