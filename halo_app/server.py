@@ -1,15 +1,17 @@
 """Halo Jr. control app. Run:  python3 server.py   then open  http://localhost:5050"""
 import logging
 import os
+import threading
 import time
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, redirect, request, send_from_directory
 
 from lamp import JOINTS, SMALL, Lamp, SerialLink, save_settings
 from vision import Vision
 from wiz import WizBulb
 from brain import Brain
 from ears import Ears
+from music import Music
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(HERE, "static"), static_url_path="/static")
@@ -19,7 +21,8 @@ logging.getLogger("werkzeug").setLevel(logging.ERROR)   # stop printing every pa
 link = SerialLink()
 lamp = Lamp(link)
 vision = Vision(lamp)
-brain = Brain(lamp)
+music = Music(lamp)
+brain = Brain(lamp, music)
 ears = Ears(lamp)
 
 
@@ -51,7 +54,7 @@ def get_settings():
 @app.post("/api/settings")
 def set_settings():
     new = request.get_json(force=True)
-    for key in ("channels", "invert", "offsets", "head", "limits", "pulse", "levels", "tracking", "light", "gestures", "small", "wiz", "llm"):
+    for key in ("channels", "invert", "offsets", "head", "limits", "pulse", "levels", "tracking", "light", "gestures", "small", "wiz", "llm", "spotify"):
         if key in new and not isinstance(new[key], type(lamp.s[key])):
             return bad("bad value for " + key)
     lamp.s.update(new)
@@ -150,6 +153,63 @@ def llm_info():
     if isinstance(m, str):
         return jsonify({"ok": False, "error": m, "models": []})
     return jsonify({"ok": True, "models": m, "model": lamp.s.get("llm", {}).get("model")})
+
+
+@app.get("/api/music")
+def music_state():
+    st = music.status()
+    st["now"] = music.now() if music.logged_in and request.args.get("now") else None
+    return jsonify(st)
+
+
+@app.post("/api/music")
+def music_do():
+    b = request.get_json(force=True)
+    try:
+        if "client_id" in b:
+            lamp.s.setdefault("spotify", {})["client_id"] = str(b["client_id"]).strip()
+            save_settings(lamp.s)
+            return ok()
+        if b.get("logout"):
+            music.logout()
+            return ok()
+        if b.get("sync"):
+            n, p = music.sync()
+            return ok(say="Saved %d songs and %d playlists for offline." % (n, p))
+        if "duck" in b:
+            threading.Thread(target=music.duck, args=(bool(b["duck"]),), daemon=True).start()
+            return ok()
+        if b.get("play"):
+            return ok(say=music.play(str(b["play"]), b.get("kind", "song")))
+        if b.get("action"):
+            return ok(say=music.control(str(b["action"])))
+        if "volume" in b:
+            return ok(say=music.volume(int(b["volume"])))
+    except RuntimeError as e:
+        return bad(str(e))
+    except OSError as e:
+        return bad("No internet for Spotify (%s)" % e)
+    return bad("nothing to do")
+
+
+@app.get("/spotify/login")
+def spotify_login():
+    try:
+        return redirect(music.login_url())
+    except RuntimeError as e:
+        return str(e), 400
+
+
+@app.get("/spotify/callback")
+def spotify_callback():
+    if request.args.get("error"):
+        return "<h2>Spotify said: %s</h2>" % request.args["error"], 400
+    try:
+        music.finish_login(request.args.get("code", ""))
+    except Exception as e:
+        return "<h2>Spotify login failed</h2><p>%s</p>" % e, 400
+    return ("<body style='font:18px system-ui;background:#111;color:#eee;padding:40px'>"
+            "<h2>Spotify connected ✓</h2><p>Halo is saving your songs for offline use. You can close this tab.</p></body>")
 
 
 @app.get("/api/stt")

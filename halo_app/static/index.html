@@ -190,6 +190,31 @@ table.lv input { width: 64px; }
           <p class="err" id="talk-err"></p>
         </section>
         <section style="display:grid;gap:8px">
+          <h2>Music (Spotify)</h2>
+          <p class="note" id="sp-status">Checking Spotify…</p>
+          <p id="sp-now" style="margin:0;font-weight:600"></p>
+          <div class="row" id="sp-controls">
+            <button data-sp="previous" title="Previous">⏮</button><button data-sp="pause" title="Pause">⏸</button>
+            <button data-sp="resume" title="Play">▶</button><button data-sp="next" title="Next">⏭</button>
+            <label class="slider" style="flex:1;min-width:140px">Volume <output id="o-sp-vol">–</output><input type="range" id="sp-vol" min="0" max="100" step="5"></label>
+          </div>
+          <div class="row">
+            <input id="sp-client" placeholder="Spotify Client ID" style="flex:1;min-width:180px">
+            <button id="sp-connect">Connect Spotify</button>
+            <button id="sp-sync" title="Save your liked songs and playlists so Halo can play downloaded songs offline">Save songs for offline</button>
+          </div>
+          <p class="err" id="sp-err"></p>
+          <details class="note"><summary>First-time Spotify setup (once, needs Spotify Premium)</summary>
+            <ol style="margin:6px 0 0 18px;padding:0">
+              <li>Go to <b>developer.spotify.com/dashboard</b>, log in, <b>Create app</b>.</li>
+              <li>Redirect URI: <code>http://127.0.0.1:5050/spotify/callback</code> (exactly), tick <b>Web API</b>, Save.</li>
+              <li>Copy the <b>Client ID</b> into the box above, press <b>Connect Spotify</b>, log in and Agree.</li>
+              <li>Keep the <b>Spotify app</b> open on this laptop. For offline, download your playlists in the Spotify app.</li>
+            </ol>
+            Say: "Hey GWM, play Blinding Lights", "…play my chill playlist", "…pause", "…next song", "…volume 40".
+          </details>
+        </section>
+        <section style="display:grid;gap:8px">
           <h2>Voice and brain</h2>
           <div class="grid2">
             <label class="field">Model (Ollama)<select id="llm-model" style="width:100%"></select></label>
@@ -367,17 +392,18 @@ function speak(text) {
   const v = speechSynthesis.getVoices().find(v => v.name === $('voice').value); if (v) u.voice = v;
   u.lang = $('lang').value;
   speaking = true; if (rec) try { rec.abort(); } catch (e) {} W.buf = [];
-  u.onend = u.onerror = () => { speaking = false; if (wakeOn) startRec(true); };
+  u.onend = u.onerror = () => { speaking = false; duck(false); if (wakeOn) startRec(true); };
   speechSynthesis.cancel(); speechSynthesis.speak(u);
 }
 async function ask(text) {
   text = text.trim(); if (!text) return;
+  duck(true);
   bubble('me', text); $('talk-err').textContent = ''; $('heard').textContent = 'Thinking…';
   try {
     const r = await api('/api/chat', { text });
     bubble('halo', r.reply, r.actions && r.actions.length ? '→ ' + r.actions.join(', ') : '');
     speak(r.reply);
-  } catch (e) { $('talk-err').textContent = e.message; }
+  } catch (e) { $('talk-err').textContent = e.message; duck(false); }
   $('heard').innerHTML = '&nbsp;';
 }
 function wakeRe() {
@@ -442,7 +468,7 @@ function onHeard(t, wake) {
   const m = t.match(wakeRe());
   if (m) {
     if (m[1] && m[1].trim().length > 1) ask(m[1]);
-    else { waitingCmd = true; $('heard').textContent = 'Yes? I\'m listening…'; api('/api/move', { name: 'nod' }).catch(() => {}); setTimeout(() => { if (waitingCmd) { waitingCmd = false; $('heard').innerHTML = '&nbsp;'; } }, 8000); }
+    else { duck(true); waitingCmd = true; $('heard').textContent = 'Yes? I\'m listening…'; api('/api/move', { name: 'nod' }).catch(() => {}); setTimeout(() => { if (waitingCmd) { waitingCmd = false; $('heard').innerHTML = '&nbsp;'; } }, 8000); }
   } else $('heard').textContent = 'Heard: “' + t.trim() + '” (say “' + ($('wake-word').value || 'hey gwm') + '” first)';
 }
 function stopRec() { if (rec) try { rec.abort(); } catch (e) {} wStop(false); }
@@ -470,7 +496,7 @@ function startRec(wake) {
   };
   try { rec.start(); } catch (e) {}
 }
-const pttDown = e => { e.preventDefault(); holding = true; speechSynthesis.cancel(); speaking = false; $('ptt').textContent = '🎤 Listening… (let go to send)'; startRec(false); };
+const pttDown = e => { e.preventDefault(); holding = true; duck(true); speechSynthesis.cancel(); speaking = false; $('ptt').textContent = '🎤 Listening… (let go to send)'; startRec(false); };
 const pttUp = () => { if (!holding) return; holding = false; $('ptt').textContent = '🎤 Hold to talk'; if (useWhisper()) wStop(true); else if (rec) try { rec.stop(); } catch (e) {} if (wakeOn) setTimeout(() => startRec(true), 600); };
 $('ptt').addEventListener('mousedown', pttDown); $('ptt').addEventListener('touchstart', pttDown, { passive: false });
 ['mouseup', 'mouseleave', 'touchend'].forEach(ev => $('ptt').addEventListener(ev, pttUp));
@@ -491,6 +517,7 @@ $('voice').onchange = () => { try { localStorage.setItem('halo-voice', $('voice'
 async function llmLoad() {
   const s = await api('/api/settings'); LLM = s.llm || {};
   $('wake-word').value = LLM.wake_word || 'hey gwm'; $('lang').value = LLM.lang || 'en-US'; fillVoices();
+  $('sp-client').value = (s.spotify || {}).client_id || ''; spLoad();
   $('stt').value = LLM.stt || 'chrome'; $('wmodel').value = LLM.whisper_model || 'base.en';
   if (useWhisper()) {
     const st = await api('/api/stt?load=1').catch(() => ({}));
@@ -512,6 +539,38 @@ $('llm-save').onclick = async () => {
   llmLoad();
 };
 llmLoad().catch(() => {});
+
+// ---------- Spotify ----------
+const spErr = m => { $('sp-err').textContent = m || ''; };
+async function spDo(body) {
+  spErr();
+  try { const r = await api('/api/music', body); if (r.say) $('sp-now').textContent = r.say; setTimeout(spLoad, 800); return r; }
+  catch (e) { spErr(e.message); }
+}
+async function spLoad() {
+  if ($('tab-talk').hidden) return;
+  let st; try { st = await fetch('/api/music?now=1').then(r => r.json()); } catch (e) { return; }
+  const saved = st.saved_songs ? ` · ${st.saved_songs} songs saved for offline` : '';
+  $('sp-status').textContent = !st.client_id ? 'Not set up: paste your Spotify Client ID below (see First-time setup).'
+    : !st.logged_in ? 'Client ID saved. Press Connect Spotify and log in.' : 'Spotify connected' + saved;
+  $('sp-status').style.color = st.logged_in ? 'var(--ok)' : 'var(--warn)';
+  $('sp-controls').style.opacity = st.logged_in || st.saved_songs ? 1 : .5;
+  if (st.now) $('sp-now').textContent = (st.now.playing ? '♪ ' : '⏸ ') + st.now.name + ' · ' + st.now.artist;
+}
+setInterval(spLoad, 5000);
+document.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => spDo({ action: b.dataset.sp }));
+$('sp-vol').oninput = () => $('o-sp-vol').textContent = $('sp-vol').value;
+$('sp-vol').onchange = () => spDo({ volume: +$('sp-vol').value });
+$('sp-connect').onclick = async () => {
+  const id = $('sp-client').value.trim();
+  if (id) await spDo({ client_id: id });
+  window.open('http://127.0.0.1:5050/spotify/login', '_blank');
+  setTimeout(spLoad, 4000);
+};
+$('sp-sync').onclick = () => { $('sp-now').textContent = 'Saving your songs…'; spDo({ sync: true }); };
+// turn the music down while Halo listens and talks, back up after
+let duckTimer = null;
+function duck(on) { clearTimeout(duckTimer); if (on) api('/api/music', { duck: true }).catch(() => {}); else duckTimer = setTimeout(() => api('/api/music', { duck: false }).catch(() => {}), 1200); }
 
 // ---------- WiZ bulb ----------
 const wizMsg = (m, bad) => { $('wiz-msg').textContent = m; $('wiz-msg').style.color = bad ? '' : 'var(--ok, #3ccf7a)'; };

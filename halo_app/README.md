@@ -69,6 +69,14 @@ Voice recognition: **Whisper** runs on your laptop with no internet. Install it 
 `pip install -r requirements-voice.txt` and open the Talk tab once with internet so the model downloads
 (base is about 140 MB). If Whisper isn't installed the page falls back to Chrome's recognition (needs internet).
 
+## Music (Spotify, by voice)
+Needs Spotify Premium and the Spotify app open on the laptop.
+1. developer.spotify.com/dashboard -> Create app -> Redirect URI `http://127.0.0.1:5050/spotify/callback`, tick Web API.
+2. Talk tab -> Music: paste the Client ID -> Connect Spotify -> log in.
+Say "Hey GWM, play Blinding Lights" / "play my chill playlist" / "play some Drake" / "pause" / "next song" / "volume 40".
+Music turns down while Halo listens and talks. Offline: songs saved with "Save songs for offline" (and downloaded
+in the Spotify app) still play by name; pause/next use the media keys.
+
 ## Files
 | File | What it does |
 |---|---|

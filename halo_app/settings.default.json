@@ -144,5 +144,8 @@
     "whisper_model": "base.en"
   },
   "pinout": 2,
-  "wifi_host": "192.168.4.1"
+  "wifi_host": "192.168.4.1",
+  "spotify": {
+    "client_id": ""
+  }
 }

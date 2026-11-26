@@ -2,3 +2,5 @@ settings.json
 settings.json.tmp
 __pycache__/
 .DS_Store
+spotify_token.json
+spotify_library.json
